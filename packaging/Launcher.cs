@@ -8,6 +8,25 @@ using System.Windows.Forms;
 
 internal static class Launcher
 {
+    // Replaced by the local builder after generating the payload manifest.
+    const string ManifestSha256 = "__MANIFEST_SHA256__";
+
+    static void CheckInventory(string directory, string root, HashSet<string> seen)
+    {
+        CheckPath(directory);
+        foreach (var entry in Directory.GetFileSystemEntries(directory))
+        {
+            CheckPath(entry); // Reject junctions before descending into them.
+            if ((File.GetAttributes(entry) & FileAttributes.Directory) != 0)
+                CheckInventory(entry, root, seen);
+            else
+            {
+                var relative = entry.Substring(root.Length + 1).Replace('\\', '/');
+                if (relative == "OfflineKeyVault.exe" || relative == "manifest.sha256") continue;
+                if (!seen.Contains(relative)) throw new IOException("Unexpected package file: " + relative);
+            }
+        }
+    }
     static void CheckPath(string path)
     {
         for (var current = new FileInfo(path).FullName; current != null; current = Path.GetDirectoryName(current))
@@ -42,8 +61,25 @@ internal static class Launcher
     {
         var manifest = Path.Combine(root, "manifest.sha256");
         CheckPath(manifest);
+        // Hash and parse the same snapshot; a mutable checksum list is not trust.
+        byte[] manifestBytes;
+        using (var stream = File.OpenRead(manifest))
+        {
+            if (stream.Length > 4 * 1024 * 1024) throw new IOException("Manifest too large.");
+            using (var buffer = new MemoryStream())
+            {
+                stream.CopyTo(buffer);
+                manifestBytes = buffer.ToArray();
+            }
+        }
+        using (var sha = SHA256.Create())
+        {
+            var actual = BitConverter.ToString(sha.ComputeHash(manifestBytes)).Replace("-", "").ToLowerInvariant();
+            if (!String.Equals(actual, ManifestSha256, StringComparison.Ordinal))
+                throw new IOException("Manifest does not match this launcher.");
+        }
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var line in File.ReadAllLines(manifest, Encoding.UTF8))
+        foreach (var line in new UTF8Encoding(false, true).GetString(manifestBytes).Split(new[] {'\n'}, StringSplitOptions.RemoveEmptyEntries))
         {
             if (line.Length < 67 || line.Substring(64, 2) != "  ") throw new IOException("Invalid manifest.");
             var relative = line.Substring(66);
@@ -59,6 +95,7 @@ internal static class Launcher
         }
         foreach (var required in new[] {"runtime/pythonw.exe", "runtime/python.exe", "runtime/python312._pth", "app/launch.py"})
             if (!seen.Contains(required)) throw new IOException("Incomplete manifest.");
+        CheckInventory(root, root, seen);
     }
     [STAThread]
     static int Main(string[] args)
@@ -83,7 +120,7 @@ internal static class Launcher
             var runtime = Path.Combine(root, "runtime");
             var start = new ProcessStartInfo();
             start.FileName = Path.Combine(runtime, diagnostic ? "python.exe" : "pythonw.exe");
-            start.Arguments = "-I -S \"" + Path.Combine(root, "app", "launch.py") + "\"" + (diagnostic ? " --self-test" : "");
+            start.Arguments = "-I -S -B \"" + Path.Combine(root, "app", "launch.py") + "\"" + (diagnostic ? " --self-test" : "");
             start.WorkingDirectory = root;
             start.UseShellExecute = false;
             start.CreateNoWindow = true;

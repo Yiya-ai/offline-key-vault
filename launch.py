@@ -1,7 +1,7 @@
 """Isolated source and portable entry point. No online installation."""
 import sys
-from pathlib import Path
 sys.dont_write_bytecode = True
+from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(1, str(Path(__file__).resolve().parent / 'vendor'))
 from keyvault.offline import install

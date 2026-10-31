@@ -2,20 +2,26 @@
 import hashlib
 import os
 from contextlib import contextmanager
-from .safeio import local_path, read_limited
+from .safeio import local_path, opened_local
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
 
 class PKCS11Token:
     def __init__(self, module, expected_sha256):
         path = local_path(module)
-        actual = hashlib.sha256(read_limited(path, 64 * 1024 * 1024)).hexdigest()
-        if not isinstance(expected_sha256, str) or actual != expected_sha256.lower():
-            raise ValueError('PKCS#11 驱动摘要不匹配')
-        import PyKCS11
-        self.api = PyKCS11
-        self.library = PyKCS11.PyKCS11Lib()
-        self.library.load(str(path))
+        # Windows denies writes/renames until LoadLibrary has opened this file.
+        # POSIX descriptors do not enforce mandatory sharing; see SECURITY.md.
+        with opened_local(path) as stream:
+            data = stream.read(64 * 1024 * 1024 + 1)
+            if len(data) > 64 * 1024 * 1024:
+                raise ValueError('PKCS#11 驱动文件过大')
+            actual = hashlib.sha256(data).hexdigest()
+            if not isinstance(expected_sha256, str) or actual != expected_sha256.lower():
+                raise ValueError('PKCS#11 驱动摘要不匹配')
+            import PyKCS11
+            self.api = PyKCS11
+            self.library = PyKCS11.PyKCS11Lib()
+            self.library.load(str(path))
         self.digest = actual
 
     def slots(self):

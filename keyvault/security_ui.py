@@ -70,7 +70,9 @@ def show_settings(app):
 
 def show_recovery(app):
     from .app import UI_FONT
-    path = filedialog.askopenfilename(parent=app.root, title='选择需要恢复的本地密钥库', filetypes=[('加密密钥库', '*.okv'), ('所有文件', '*.*')])
+    ok, initial = app.attempt(lambda: app.preferences.directory('vault'))
+    if not ok: return
+    path = filedialog.askopenfilename(parent=app.root, initialdir=initial, title='选择需要恢复的本地密钥库', filetypes=[('加密密钥库', '*.okv'), ('所有文件', '*.*')])
     if not path:
         return
     ok, status = app.attempt(lambda: app.vault.inspect_security(path))
@@ -88,7 +90,9 @@ def show_recovery(app):
     file_label = ttk.Label(pane, text='尚未选择恢复文件', wraplength=625, foreground='#777783')
     file_label.pack(anchor='w', pady=8)
     def choose():
-        value = filedialog.askopenfilename(parent=win, title='选择独立恢复文件', filetypes=[('离线恢复文件', '*.okvr'), ('所有文件', '*.*')])
+        ok, initial = app.attempt(lambda: app.preferences.directory('import'), win)
+        if not ok: return
+        value = filedialog.askopenfilename(parent=win, initialdir=initial, title='选择独立恢复文件', filetypes=[('离线恢复文件', '*.okvr'), ('所有文件', '*.*')])
         if value:
             selected.set(value)
             file_label.configure(text=Path(value).name)

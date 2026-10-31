@@ -119,8 +119,9 @@ def test_manager_action_buttons_visible(tmp_path):
         root.geometry('1040x680')
         root.update()
         for label in ('编辑名称 / 标签 / 备注', '导出公钥文件', '导出私钥文件', '删除记录'):
-            button = next(w for w in descendants(root) if isinstance(w, ttk.Button) and w.cget('text') == label)
+            button = app.detail_buttons[label]
             assert button.winfo_ismapped()
             assert button.winfo_rooty() + button.winfo_height() <= root.winfo_rooty() + root.winfo_height()
+            assert button.winfo_rooty() + button.winfo_height() <= button.master.winfo_rooty() + button.master.winfo_height()
     finally:
         app.quit()

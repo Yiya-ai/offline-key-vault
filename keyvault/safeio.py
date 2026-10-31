@@ -208,7 +208,9 @@ def write_new(path, data):
             raise
 
 
-def read_limited(path, limit):
+@contextmanager
+def opened_local(path):
+    """Keep the checked stream and Windows parent/read-sharing locks alive."""
     with pinned_path(path) as p:
         if os.name == 'nt':
             import msvcrt
@@ -229,7 +231,12 @@ def read_limited(path, limit):
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise StorageError('只允许独立的普通文件')
-            data = stream.read(limit + 1)
+            yield stream
+
+
+def read_limited(path, limit):
+    with opened_local(path) as stream:
+        data = stream.read(limit + 1)
     if len(data) > limit:
         raise StorageError('文件过大，已拒绝读取')
     return data

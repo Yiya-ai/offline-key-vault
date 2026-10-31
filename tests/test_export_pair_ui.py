@@ -87,7 +87,7 @@ def test_export_settings_ui_persists(tmp_path):
     try:
         app.export_settings_dialog(); win=dialog(root)
         entry=next(w for w in descendants(win) if type(w)==ttk.Entry); entry.insert(0,str(tmp_path))
-        with patch('keyvault.app.messagebox.showinfo'): press(win,'保存导出设置')
+        with patch('keyvault.app.messagebox.showinfo'): press(win,'保存路径设置')
         assert app.preferences.export_directory()==str(tmp_path)
     finally: app.quit()
 

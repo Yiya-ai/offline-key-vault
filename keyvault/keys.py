@@ -146,6 +146,8 @@ def import_key(data, password='', raw_kind=None):
         data = data.strip().encode('utf-8')
     if not isinstance(data, bytes) or not 0 < len(data) <= MAX_KEY_BYTES:
         raise KeyError('密钥为空或超过 128 KiB 限制')
+    if data.startswith(b'\xef\xbb\xbf') and data[3:].lstrip().startswith((b'-----BEGIN ', b'{', b'ssh-', b'ecdsa-', b'PuTTY-User-Key-File-')):
+        data = data[3:]
     if raw_kind:
         if data.strip().startswith((b'-----BEGIN ', b'{', b'ssh-', b'ecdsa-')) or _base64_der(data) is not None:
             raise KeyError('检测到带结构的密钥，不是 X25519 原始 32 字节数据。请选择“自动识别”后重试。')

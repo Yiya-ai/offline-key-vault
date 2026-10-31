@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A local desktop application for generating, organizing, importing and exporting public/private keys. The current interface is in Chinese. The application stores records in an encrypted local vault and provides standalone public-key conversion and key-pair matching tools.
+A local desktop application for generating, organizing, importing and exporting public/private keys. The current interface is in Chinese. The application stores records in an encrypted local vault and provides standalone public/private-key conversion and key-pair matching tools.
 
 The application has no upload, telemetry, online update or automatic dependency-download feature. It does not run a web server or listen on a port. Native libraries and the operating system remain part of the trust boundary; see [Security and privacy](#security-and-privacy).
 
@@ -20,10 +20,10 @@ The application has no upload, telemetry, online update or automatic dependency-
 
 - Generate a key pair and manage its name, tags and notes in an encrypted vault.
 - Import supported key text or local files; recognize standard Base64 DER without PEM headers.
-- Convert public-key text to a file without creating or unlocking a vault.
+- Convert public- or private-key text to a file without creating or unlocking a vault.
 - Export the private key belonging to the selected record. Public-only records cannot produce a private key.
 - Check whether a public key and a private key match, including across supported encodings, without saving them to a vault.
-- Use the record name as the default export filename and optionally remember a local export directory. Existing files are not overwritten.
+- Use the record name as the default export filename and configure separate default vault, import and export directories. Existing files are not overwritten.
 - Create encrypted backups, change the master passphrase and lock with Ctrl+L or after five minutes of inactivity.
 - Optionally configure failed-attempt destruction and two-factor passphrase recovery.
 
@@ -85,6 +85,26 @@ The builder copies allowlisted application files, the local Python/Tk runtime, s
 
 For experimental macOS builds, consult [MACOS.md](MACOS.md) (Chinese). Windows binaries do not run on macOS, and the Mac path does not yet offer the same storage safeguards.
 
+## Desktop installer and interaction improvements
+
+Latest verification (2026-10-31): the security fixes passed source tests and extracted portable-package checks. Rebuilding the installer still fails with access denied while extracting `runtime/vcruntime140.dll`; the cause is unresolved. An older installer does not contain the latest fixes. Use the current source or verified portable build until installer verification succeeds. No new public binary release is implied.
+
+On Windows, open `dist/offline-key-vault-setup.exe`. Choose a new local installation folder (typing or local directory browsing) and select whether to create desktop and Start menu shortcuts. Installation is offline and per-user, with no administrator requirement. Existing folders and shortcuts are never overwritten; upgrades use a new folder and reopen the existing vault. The installer does not launch the application automatically. To remove a version, first move any vaults/exports you placed inside it, then remove that application folder and its shortcuts. There is no system-service or registry installation.
+
+Build the portable ZIP first, then run `python -I -S build_installer.py`, or use `build_installer.cmd` for both steps. The builder tests actual extraction, installed-runtime checks, shortcut targets and overwrite refusal inside an isolated test directory; it does not create real desktop shortcuts during verification. The installer is unsigned and retains the same third-party distribution-license requirements as the portable bundle.
+
+Settings now provide separate vault, key-import and key-export directories. Path inputs refresh local directory listings after a short typing delay; no Go click is required. Saving a dialog always resolves the latest typed path. Password/PIN fields start masked and use an inline eye icon; moving focus outside the field and its eye control masks the value again. Mouse wheels scroll the control under the pointer or its surrounding form.
+
+Primary actions use red, secondary buttons have subtle rounded surfaces, and destructive actions use a soft-red treatment. Input fields, focus indicators and scrollbars share the same styling, including the installer. Forms wrap descriptions and long names to the available width. Window resizing scales text, controls, icons and spacing by a uniform ratio; the client area retains its initial aspect ratio with no letterboxing. Resize from one of the four corners; side-only resizing and maximizing are disabled. The zoom floor is 80%; the dashboard uses 12 pt body/navigation text and a 10 pt minimum, while dense tool dialogs retain an 8 pt minimum. Sidebar footer information and detail actions use the available window height. Two-column tools stack in narrow windows; action buttons remain outside the scrolling form. Scrollbars appear only when content overflows; keyboard focus brings off-screen fields into view. Default paths use inline browse controls, and the hardware-token dialog groups connection, public-key and generation controls. Layout regression checks cover 100%, 150% and 200% Tk font scaling; native macOS rendering remains unverified.
+
+The locked-screen **Key text to file** tool accepts public or private keys. Standard private-key output is encrypted by default; raw/plaintext output requires explicit consent. `Original` preserves the validated input bytes and their existing encryption state; it does not add a new passphrase.
+
+Single-record imports now retain original input bytes inside the authenticated encrypted vault. **Export imported original** rechecks the master passphrase and restores those bytes, including line endings and existing encryption. Ordinary exports preserve key material but may change encoding or encrypted ciphertext. Old records and multi-record containers have no saved original; re-import a single original document if exact restoration is required. Imported-original records require this application version or newer; back up before upgrading and do not reopen them in older versions.
+
+OpenSSH re-export also regenerates random check values, may change Base64 wrapping and padding, and currently drops the original SSH comment. These differences do not change the key pair. Choose **Export imported original** when byte-for-byte preservation is required; selecting the same format alone does not preserve the original file.
+
+**View key contents** displays the stored public key. Revealing the normalized plaintext private key requires the master passphrase; it hides after 60 seconds and closes immediately when the vault locks. The application does not automatically copy it, but explicitly visible content can be selected/copied by the user or captured by other software.
+
 ## Basic workflow
 
 1. Create a vault in a non-synced local directory and choose a strong master passphrase of at least 12 characters. Length alone does not guarantee strength.
@@ -101,7 +121,7 @@ A text editor can display an encrypted PEM file's header and Base64 ciphertext. 
 
 For this application's PKCS#8 PEM exports, `BEGIN ENCRYPTED PRIVATE KEY` denotes encrypted output and `BEGIN PRIVATE KEY` denotes plaintext output. Other formats have different markers; their first line alone may not identify encryption.
 
-**Selecting explicit plaintext export takes precedence over entering an export passphrase.** The UI requests confirmation, but the resulting file is unencrypted. JWK, raw private keys and this application's traditional PKCS#1/SEC1 exports require that option. Protect exported files separately; changing the vault passphrase cannot protect or revoke old exports.
+**Selecting explicit plaintext export clears and disables the export-passphrase fields.** The UI requests confirmation, and the resulting file is unencrypted. JWK, raw private keys and this application's traditional PKCS#1/SEC1 exports require that option. Protect exported files separately; changing the vault passphrase cannot protect or revoke old exports.
 
 ## Failed-attempt protection and recovery
 
@@ -117,9 +137,9 @@ Saving security settings upgrades an OKV1 vault to OKV2; older application versi
 - Imports are limited to 128 KiB, vaults to 16 MiB / 1,000 records, and KDF work/memory parameters are bounded before expensive processing.
 - Windows creates sensitive files with a protected current-user DACL and checks local volumes, links and path components. Targets without persistent ACL support are refused. Mac protection is incomplete and remains experimental.
 - The application does not log private keys, passphrases or PINs or automatically copy them to the clipboard. Python/Tcl/OpenSSL memory copies, a compromised OS, administrators and other processes are outside complete application control.
-- The optional export-directory preference stores only the selected directory in `.offline-key-vault-preferences.json`, with current-user file protection. Paths and export filenames can disclose personal or business information even when key contents are encrypted. Clearing the default directory is available in export settings.
+- The optional path preferences store only the selected vault, import and export directories in `.offline-key-vault-preferences.json`, with current-user file protection. Paths and export filenames can disclose personal or business information even when key contents are encrypted. Clear any directory field in Settings to restore its default. Old export-only settings are read automatically.
 - No application upload or telemetry feature exists. Python audit hooks block covered network/process calls, but do not sandbox native code or stop a separate cloud-sync client. Strict offline operation requires a disconnected device or independently enforced OS isolation.
-- PKCS#11 drivers are executable native code. Select only trusted local drivers; a digest alone is not publisher authentication. Driver check/load race hardening and real-device testing remain outstanding.
+- PKCS#11 drivers are executable native code. Select only trusted local drivers; a digest alone is not publisher authentication. Windows holds checked driver and parent handles through loading to block replacement. Equivalent mandatory locking on macOS and real-device testing remain outstanding.
 
 See [SECURITY.md](SECURITY.md) for bilingual reporting guidance. Do not send real keys, vaults, recovery files, passphrases, personal paths or sensitive screenshots in an issue or support request.
 

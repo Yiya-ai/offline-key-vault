@@ -6,9 +6,11 @@ This project has not undergone an independent third-party security audit and doe
 
 The application has no upload, telemetry, update-check or network-client feature. Its Python audit hook rejects covered network and external-process calls. This is not an OS sandbox and cannot constrain malicious native drivers, modified dependencies or other processes. Use a disconnected device for strict physical offline operation.
 
-Master/recovery passphrases, PINs and private keys are not logged. Names, tags, notes and keys are stored in the authenticated encrypted vault. The optional export directory is the only persistent preference, protected by current-user file permissions and containing no keys or passphrases. It can contain a personal path and must not be published.
+Master/recovery passphrases, PINs and private keys are not logged. Names, tags, notes and keys are stored in the authenticated encrypted vault. The optional vault, import and export directories are persistent preferences, protected by current-user file permissions and containing no keys or passphrases. It can contain a personal path and must not be published.
 
 Failed-attempt destruction logically removes the current vault; it cannot reliably erase SSD history, historical backups or exports, or prevent counter rollback. Recovery requires a previously configured recovery passphrase and independent recovery file. See SECURITY_RECOVERY.md. Mac safeguards and unverified behavior are documented in MACOS.md; those detailed documents are currently in Chinese.
+
+Windows packages bind the manifest digest into the launcher and reject unlisted files. Keep vaults and exports outside the program folder. This assumes a trusted launcher: replacing the executable, bypassing it to run Python directly, or modifying files after checks remains outside this integrity gate. No publisher signature is provided. Native driver dependencies also remain trusted; the Windows check/load file lock does not constitute a native-code sandbox. macOS lacks this mandatory file-sharing guarantee.
 
 ### Reporting a vulnerability
 
@@ -18,15 +20,19 @@ Include only the version, OS, expected/actual behavior and reproduction steps us
 
 After confirmation, fix and regression-test the issue before coordinating disclosure. Never paste sensitive material into public issues or CI logs. Release checks are bounded pattern scans and allowlist checks, not proof that every kind of secret is absent.
 
+Explicit private-key viewing rechecks the master passphrase, hides after 60 seconds and closes on lock. Imported original bytes are encrypted with the vault and may contain plaintext private keys; original export always requires reauthentication and confirmation.
+
 ## 简体中文
 
 本项目尚未经过独立第三方安全审计；没有承诺响应时限或长期支持版本。请使用可信操作系统并保护离线备份。
 
 应用不含上传、遥测、更新检查或网络客户端；Python audit hook 拒绝网络和外部进程调用。该钩子不是操作系统沙箱，不能约束恶意原生驱动、被篡改的依赖或其他进程。严格物理离线使用断网设备。
 
-主口令、恢复口令、PIN 和私钥不写入日志。名称、标签、备注及密钥保存在认证加密库中；默认导出目录是用户主动设置的唯一持久偏好，按用户权限保护，不存储密钥或口令。该偏好可能包含个人路径，禁止发布。
+主口令、恢复口令、PIN 和私钥不写入日志。名称、标签、备注及密钥保存在认证加密库中；密钥库、导入和导出默认目录是用户主动设置的持久偏好，按用户权限保护，不存储密钥或口令。该偏好可能包含个人路径，禁止发布。
 
 失败自毁为当前库的逻辑销毁，不能可靠擦除 SSD、历史备份、导出文件，也不能阻止离线回滚计数。恢复需要预先配置恢复口令和独立恢复文件。详见 SECURITY_RECOVERY.md。Mac 安全边界和未验证项见 MACOS.md。
+
+Windows 包将清单摘要固化到启动器，并拒绝未列入清单的额外文件。请将密钥库与导出文件保存于程序目录之外。该门禁以启动器本身可信为前提：替换启动器、绕开启动器直接运行 Python、或在检查后改写文件仍超出此完整性校验的保障范围；本项目没有发布者数字签名。原生驱动的依赖也必须可信，Windows 的驱动校验/加载文件锁不是原生代码沙箱，macOS 尚无同等强制共享锁保证。
 
 ### 报告流程
 
@@ -35,3 +41,5 @@ After confirmation, fix and regression-test the issue before coordinating disclo
 报告仅包含版本、操作系统、预期/实际行为及合成数据复现步骤。不要附真实密钥、口令、恢复文件、库、个人路径、截图或完整环境转储。密码学问题可先描述输入结构，使用运行时生成的替代样本。
 
 确认问题后，应先修复并完成回归，再协调公开说明。不要在公开 issue 或 CI 日志中粘贴敏感内容。发布审查是有限的模式检查及白名单核对，不能证明没有所有类型的秘密。
+
+明确查看私钥需复核主口令，60 秒后隐藏，锁库立即关闭。导入原文字节与库一同加密，可能包含明文私钥；原文导出始终要求再次验证和确认。

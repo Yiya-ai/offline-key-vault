@@ -7,19 +7,25 @@ import stat
 import tkinter as tk
 from tkinter import ttk, messagebox
 from .safeio import local_path, pinned_path
+from .widgets import ui_scale, connect_scrollbar, WindowScale
 
 
 def _choose(parent, title='', save=False, initialfile='', defaultextension='', initialdir='', directory=False, **unused):
     win = tk.Toplevel(parent)
     win.title(title or '选择本地文件')
-    win.geometry('790x540')
-    win.minsize(650, 480)
+    scale = ui_scale(parent)
+    max_width, max_height = parent.winfo_screenwidth() - 80, parent.winfo_screenheight() - 100
+    width, height = min(round(790 * scale), max_width), min(round(540 * scale), max_height)
+    win.geometry(f'{width}x{height}')
+    WindowScale(win, width, height)
     win.transient(parent)
     win.grab_set()
-    pane = ttk.Frame(win, padding=20)
+    pane = ttk.Frame(win._stage, padding=20)
     pane.pack(fill='both', expand=True)
     result, entries = [''], []
     current = [None]
+    changing = [False]
+    pending = [None]
     ttk.Label(pane, text='仅浏览本地磁盘 · 不加载系统文件选择器或云盘插件').pack(anchor='w', pady=(0, 12))
     nav = ttk.Frame(pane)
     nav.pack(fill='x')
@@ -30,21 +36,30 @@ def _choose(parent, title='', save=False, initialfile='', defaultextension='', i
         drives = ['/']
     drive = ttk.Combobox(nav, values=drives, state='readonly', width=7)
     drive.pack(side='left', padx=(0, 8))
-    folder = ttk.Entry(nav)
+    folder_value = tk.StringVar(win)
+    folder = ttk.Entry(nav, textvariable=folder_value)
     folder.pack(side='left', fill='x', expand=True)
     listing = ttk.Frame(pane)
     listing.pack(fill='both', expand=True, pady=12)
-    box = tk.Listbox(listing, font=('PingFang SC' if sys.platform == 'darwin' else 'Microsoft YaHei UI', 10), activestyle='dotbox', exportselection=False)
+    box = tk.Listbox(listing, font=('PingFang SC' if sys.platform == 'darwin' else 'Microsoft YaHei UI', 10), activestyle='dotbox', exportselection=False, relief='flat', bd=0, bg='#fafbfc', fg='#25252d', selectbackground='#fff0f2', selectforeground='#25252d', highlightthickness=1, highlightbackground='#c9cdd8', highlightcolor='#dc3545')
     scroll = ttk.Scrollbar(listing, command=box.yview)
-    box.configure(yscrollcommand=scroll.set)
+    horizontal = ttk.Scrollbar(listing, orient='horizontal', command=box.xview)
+    horizontal.pack(side='bottom', fill='x')
+    connect_scrollbar(box, scroll)
+    connect_scrollbar(box, horizontal, axis='x')
+    scroll.scroll_target = box
     scroll.pack(side='right', fill='y')
     box.pack(fill='both', expand=True)
     ttk.Label(pane, text='目录路径（留空选择当前目录）' if directory else '文件名（也可输入完整本地路径）').pack(anchor='w', pady=(0, 5))
-    filename = ttk.Entry(pane)
+    filename_value = tk.StringVar(win)
+    filename = ttk.Entry(pane, textvariable=filename_value)
     filename.insert(0, initialfile)
     filename.pack(fill='x')
 
-    def browse(value):
+    notice = ttk.Label(pane, text="", wraplength=710)
+    notice.pack(anchor="w")
+
+    def browse(value, quiet=False):
         try:
             path = local_path(value, directory=True)
             if not path.is_dir():
@@ -64,14 +79,20 @@ def _choose(parent, title='', save=False, initialfile='', defaultextension='', i
                         break
             items.sort(key=lambda x: (not x[1], x[0].casefold()))
             current[0] = path
-            folder.delete(0, 'end'); folder.insert(0, str(path))
+            changing[0] = True
+            folder_value.set(str(path))
+            changing[0] = False
+            notice.configure(text='')
             drive.set(path.anchor)
             entries[:] = items
             box.delete(0, 'end')
             for name, is_dir in items:
                 box.insert('end', ('[目录]  ' if is_dir else '          ') + name)
         except (ValueError, OSError) as error:
-            messagebox.showerror('无法浏览', str(error), parent=win)
+            if quiet:
+                notice.configure(text='路径尚不完整、不可用或不是允许的本地目录。')
+            else:
+                messagebox.showerror('无法浏览', str(error), parent=win)
 
     def select(event=None):
         if box.curselection():
@@ -95,9 +116,12 @@ def _choose(parent, title='', save=False, initialfile='', defaultextension='', i
         try:
             if current[0] is None:
                 raise ValueError('请先选择一个本地目录')
-            candidate = Path(value) if value else current[0]
+            typed = folder_value.get().strip()
+            base = local_path(typed, directory=True) if typed else current[0]
+            if not base.is_dir(): raise ValueError('目录不存在')
+            candidate = Path(value) if value else base
             if not candidate.is_absolute():
-                candidate = current[0] / candidate
+                candidate = base / candidate
             if save and not directory and not candidate.suffix and defaultextension:
                 candidate = candidate.with_suffix(defaultextension)
             candidate = local_path(candidate, directory=directory)
@@ -117,6 +141,33 @@ def _choose(parent, title='', save=False, initialfile='', defaultextension='', i
         except (ValueError, OSError) as error:
             messagebox.showerror('无法选择文件', str(error), parent=win)
 
+    def refresh_typed(source):
+        pending[0] = None
+        value = folder_value.get().strip() if source == 'folder' else filename_value.get().strip()
+        if not value: return
+        if source == 'filename':
+            candidate = Path(value)
+            if not candidate.is_absolute(): return
+            # Validate before any filesystem query; never probe a network share.
+            try:
+                if directory:
+                    browse(local_path(value, directory=True), quiet=True)
+                else:
+                    browse(local_path(candidate.parent, directory=True), quiet=True)
+            except (ValueError, OSError):
+                notice.configure(text='输入路径不可用或不是允许的本地路径。')
+        else:
+            browse(value, quiet=True)
+    def schedule(source):
+        if changing[0]: return
+        if pending[0] is not None: win.after_cancel(pending[0])
+        pending[0] = win.after(300, lambda: refresh_typed(source))
+    folder_value.trace_add('write', lambda *args: schedule('folder'))
+    filename_value.trace_add('write', lambda *args: schedule('filename'))
+    def destroyed(event):
+        if event.widget == win and pending[0] is not None:
+            win.after_cancel(pending[0]); pending[0] = None
+    win.bind('<Destroy>', destroyed, add='+')
     ttk.Button(nav, text='转到', command=lambda: browse(folder.get())).pack(side='left', padx=8)
     ttk.Button(nav, text='上级', command=lambda: browse(current[0].parent) if current[0] else None).pack(side='left')
     drive.bind('<<ComboboxSelected>>', lambda e: browse(drive.get()))

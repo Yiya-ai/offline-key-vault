@@ -89,7 +89,7 @@ def _validate_records(records):
     ids, fps = set(), set()
     required = {'id', 'name', 'tags', 'notes', 'algorithm', 'fingerprint', 'public', 'private', 'created', 'updated'}
     for r in records:
-        if not isinstance(r, dict) or set(r) not in (required, required | {'attachments'}):
+        if not isinstance(r, dict) or not required <= set(r) or set(r) - required - {'attachments', 'original'}:
             raise ValueError()
         if str(uuid.UUID(r['id'])) != r['id'] or r['id'] in ids or r['fingerprint'] in fps:
             raise ValueError()
@@ -111,6 +111,9 @@ def _validate_records(records):
         if 'attachments' in r:
             from .material import validate
             validate(r['attachments'], pub)
+        if 'original' in r:
+            raw = base64.b64decode(r['original'], validate=True)
+            if not 0 < len(raw) <= keys.MAX_KEY_BYTES or _b64(raw) != r['original']: raise ValueError()
         ids.add(r['id'])
         fps.add(r['fingerprint'])
 
@@ -182,6 +185,7 @@ class Vault(ProtectedVault):
         self._require()
         if self._protected is not None:
             return self._verify_protected(password)
+        self._check_current()
         candidate = _derive(password, self._salt)
         try:
             if not hmac.compare_digest(candidate, self._key):
@@ -209,7 +213,7 @@ class Vault(ProtectedVault):
     def records(self, query=''):
         self._require()
         query = query.casefold().strip()
-        return [{k: copy.deepcopy(v) for k, v in r.items() if k in {'id', 'name', 'tags', 'notes', 'algorithm', 'fingerprint', 'public', 'created', 'updated', 'attachments'}} | {'has_private': r['private'] is not None}
+        return [{k: copy.deepcopy(v) for k, v in r.items() if k in {'id', 'name', 'tags', 'notes', 'algorithm', 'fingerprint', 'public', 'created', 'updated', 'attachments'}} | {'has_private': r['private'] is not None, 'has_original': 'original' in r}
                 for r in self._records if not query or query in ' '.join([r['name'], *r['tags'], r['notes'], r['algorithm'], r['fingerprint']]).casefold()]
 
     def _record(self, record_id):
@@ -219,8 +223,11 @@ class Vault(ProtectedVault):
                 return r
         raise VaultError('未找到所选记录')
 
-    def add(self, key, name, tags='', notes=''):
+    def add(self, key, name, tags='', notes='', *, source=None):
         self._require()
+        if source is not None:
+            if isinstance(source, str): source = source.encode('utf-8')
+            if not isinstance(source, bytes) or not 0 < len(source) <= keys.MAX_KEY_BYTES: raise VaultError('导入原文为空或过大')
         meta = metadata(name, tags, notes)
         pub, private = keys.normalized(key)
         fp = keys.fingerprint(key)
@@ -232,7 +239,8 @@ class Vault(ProtectedVault):
         records = copy.deepcopy(self._records)
         for r in records:
             if r['fingerprint'] == fp:
-                if (r['private'] is None and private is not None) or attachments:
+                if (r['private'] is None and private is not None) or attachments or source is not None:
+                    if source is not None: r['original'] = _b64(source)
                     if r['private'] is None: r['private'] = private
                     r['updated'] = now
                     if attachments: r['attachments'] = r.get('attachments', {}) | attachments
@@ -243,11 +251,12 @@ class Vault(ProtectedVault):
             raise VaultError('最多保存 1000 条密钥记录')
         record_id = str(uuid.uuid4())
         records.append(dict(id=record_id, **meta, public=pub, private=private, algorithm=keys.algorithm(key), fingerprint=fp, created=now, updated=now))
+        if source is not None: records[-1]['original'] = _b64(source)
         if attachments: records[-1]['attachments'] = attachments
         self._commit(records)
         return record_id, False
 
-    def add_many(self, items, name, tags='', notes=''):
+    def add_many(self, items, name, tags='', notes='', *, source=None):
         self._require()
         if not 1 <= len(items) <= 50: raise VaultError('一次最多导入 50 条记录')
         original = self._records
@@ -258,7 +267,7 @@ class Vault(ProtectedVault):
         try:
             for index, item in enumerate(items):
                 title = name if len(items) == 1 else name + ' / ' + (getattr(item, 'alias', '') or str(index + 1))
-                results.append(self.add(item, title, tags, notes))
+                results.append(self.add(item, title, tags, notes, source=source if len(items) == 1 else None))
             staged = self._records
         finally:
             self._records = original
@@ -281,7 +290,7 @@ class Vault(ProtectedVault):
         self._commit([r for r in self._records if r['id'] != record_id])
 
     def export(self, record_id, path, fmt, private=False, password='', export_password='', plaintext=False):
-        self._require()
+        self._check_current()
         r = self._record(record_id)
         if private:
             self.verify(password)
@@ -303,6 +312,27 @@ class Vault(ProtectedVault):
             else:
                 data = keys.export_public(keys.import_key(r['public']), fmt)
         write_new(path, data)
+
+    def content(self, record_id, *, private=False, password=''):
+        self._require()
+        self._check_current()
+        if private: self.verify(password)
+        record = self._record(record_id)
+        value = record['private'] if private else record['public']
+        if value is None: raise VaultError('此记录只有公钥')
+        return value
+
+    def original_bytes(self, record_id, password):
+        # Original containers may contain private keys even when a UI label is public.
+        # Never expose original bytes through the unauthenticated records() listing.
+        self.verify(password)
+        record = self._record(record_id)
+        if 'original' not in record:
+            raise VaultError('此记录未保留导入原文；旧记录或多条目容器不能倒推原始文件')
+        return base64.b64decode(record['original'], validate=True)
+
+    def export_original(self, record_id, path, password):
+        write_new(path, self.original_bytes(record_id, password))
 
     def backup(self, path):
         self._check_current()

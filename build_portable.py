@@ -23,7 +23,7 @@ MODULES.update({'pycryptodomex': 'Cryptodome', 'pyjks': 'jks', 'argon2-cffi': 'a
 APP_FILES = ('launch.py', 'keyvault/__init__.py', 'keyvault/app.py', 'keyvault/offline.py',
              'keyvault/safeio.py', 'keyvault/vault.py', 'keyvault/keys.py', 'keyvault/jwk.py',
              'keyvault/pbes2.py', 'keyvault/import_guard.py', 'keyvault/localdialog.py',
-             'keyvault/diagnostics.py', 'keyvault/compat_import.py', 'keyvault/material.py', 'keyvault/native_crypto.py', 'keyvault/openpgp.py', 'keyvault/ppk.py', 'keyvault/token.py', 'keyvault/token_ui.py', 'keyvault/protection.py', 'keyvault/security_ui.py', 'keyvault/preferences.py', 'keyvault/paircheck.py', 'keyvault/tool_ui.py')
+             'keyvault/diagnostics.py', 'keyvault/compat_import.py', 'keyvault/material.py', 'keyvault/native_crypto.py', 'keyvault/openpgp.py', 'keyvault/ppk.py', 'keyvault/token.py', 'keyvault/token_ui.py', 'keyvault/protection.py', 'keyvault/security_ui.py', 'keyvault/preferences.py', 'keyvault/paircheck.py', 'keyvault/tool_ui.py', 'keyvault/widgets.py', 'keyvault/window_resize.py', 'keyvault/conversion.py', 'keyvault/content_ui.py')
 SKIP = {'__pycache__', 'site-packages', 'test', 'tests', 'idlelib', 'ensurepip', 'venv', 'turtledemo'}
 
 
@@ -85,7 +85,7 @@ def run_checked(arguments, **kwargs):
                 raise
             time.sleep(0.05 * (2 ** attempt))
     if result.returncode:
-        raise RuntimeError('Local build check failed:\n' + result.stdout + result.stderr)
+        raise RuntimeError('Local build check failed (exit ' + str(result.returncode) + '):\n' + result.stdout + result.stderr)
     return result.stdout.strip()
 
 
@@ -138,8 +138,6 @@ def main():
     copy_file(native[0], runtime / 'Lib/site-packages' / native[0].name)
     (runtime / 'python312._pth').write_text('.\nLib\nDLLs\nLib\\site-packages\n', encoding='ascii')
     launcher = bundle / 'OfflineKeyVault.exe'
-    run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
-                 '/r:System.Windows.Forms.dll', '/out:' + str(launcher), ROOT / 'packaging/Launcher.cs'])
     for name, arguments in (('launch.cmd', ''), ('self-test.cmd', '--self-test'), ('verify.cmd', '--verify')):
         body = '@echo off\r\nsetlocal\r\ncd /d "%~dp0"\r\nstart "" /wait "%~dp0OfflineKeyVault.exe" ' + arguments + '\r\n'
         body += 'set "result=%errorlevel%"\r\n'
@@ -163,7 +161,15 @@ def main():
                   'build': 'local-files-only', 'source_files': list(APP_FILES)}
     (bundle / 'build-info.json').write_text(json.dumps(build_info, indent=2) + '\n', encoding='utf-8')
     files = sorted(p for p in bundle.rglob('*') if p.is_file())
-    (bundle / 'manifest.sha256').write_text(''.join(digest(p) + '  ' + p.relative_to(bundle).as_posix() + '\n' for p in files), encoding='utf-8')
+    manifest = bundle / 'manifest.sha256'
+    manifest.write_text(''.join(digest(p) + '  ' + p.relative_to(bundle).as_posix() + '\n' for p in files), encoding='utf-8', newline='\n')
+    launcher_source = work / 'Launcher.cs'
+    template = (ROOT / 'packaging/Launcher.cs').read_text(encoding='utf-8')
+    if template.count('__MANIFEST_SHA256__') != 1:
+        raise RuntimeError('Launcher manifest binding template is invalid')
+    launcher_source.write_text(template.replace('__MANIFEST_SHA256__', digest(manifest)), encoding='utf-8')
+    run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
+                 '/r:System.Windows.Forms.dll', '/out:' + str(launcher), launcher_source])
     temporary_zip = work / 'offline-key-vault-windows-x64.zip'
     with zipfile.ZipFile(temporary_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path in sorted(p for p in bundle.rglob('*') if p.is_file()):
@@ -196,6 +202,22 @@ def main():
     if failed.returncode == 0:
         raise RuntimeError('Integrity gate accepted incomplete package')
     sample.write_bytes(original)
+    manifest_path = extracted / 'manifest.sha256'
+    original_manifest = manifest_path.read_bytes()
+    sample.write_bytes(original + b'\n# synthetic manifest rewrite test\n')
+    manifest_path.write_bytes(original_manifest.replace(hashlib.sha256(original).hexdigest().encode(), digest(sample).encode()))
+    failed = subprocess.run([str(extracted / 'OfflineKeyVault.exe'), '--verify'], cwd=work, env=env, capture_output=True, timeout=30)
+    if failed.returncode == 0:
+        raise RuntimeError('Integrity gate accepted rewritten manifest')
+    sample.write_bytes(original)
+    manifest_path.write_bytes(original_manifest)
+    extra = extracted / 'app/unlisted.py'
+    extra.write_bytes(b'# synthetic unexpected module\n')
+    failed = subprocess.run([str(extracted / 'OfflineKeyVault.exe'), '--verify'], cwd=work, env=env, capture_output=True, timeout=30)
+    if failed.returncode == 0:
+        raise RuntimeError('Integrity gate accepted unlisted module')
+    extra.unlink()
+    run_checked([extracted / 'OfflineKeyVault.exe', '--verify'], cwd=work, env=env)
     # Only publish an archive after all checks pass. No generated vaults enter it.
     output = ROOT / 'dist' / temporary_zip.name
     if output.exists():
@@ -207,7 +229,8 @@ def main():
     checksum.write_text(digest(output) + '  ' + output.name + '\n', encoding='ascii')
     report = {'ok': True, 'relocated_path_tested': True, 'host_python_removed_from_path': True,
               'external_environment_ignored': True, 'tamper_rejected': True, 'missing_file_rejected': True,
-              'archive_files': len(files) + 1, 'archive_bytes': output.stat().st_size, 'sha256': digest(output)}
+              'manifest_rewrite_rejected': True, 'unlisted_module_rejected': True,
+              'archive_files': len(files) + 2, 'archive_bytes': output.stat().st_size, 'sha256': digest(output)}
     (work / 'verification.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(json.dumps(report), flush=True)
     print('Package: ' + str(output), flush=True)

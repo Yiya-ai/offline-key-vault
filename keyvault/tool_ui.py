@@ -9,42 +9,58 @@ from . import keys
 
 def show_export_settings(app):
     from .app import UI_FONT, MUTED
-    win, pane = app.dialog('导出设置', 710, 440)
-    ttk.Label(pane, text='默认导出目录', font=(UI_FONT, 19, 'bold')).pack(anchor='w')
+    win, pane = app.dialog('设置 / 默认路径', 760, 580)
+    ttk.Label(pane, text='默认路径', font=(UI_FONT, 20, 'bold')).pack(anchor='w')
+    ttk.Label(pane, text='为密钥库、导入和导出分别设置本地目录。留空时使用用户目录。', foreground=MUTED).pack(anchor='w', pady=(6, 12))
     try:
-        saved = app.preferences.load()
-        notice = '公钥、私钥和公钥文本转换共用此目录；每次导出仍可选择其他位置。'
+        saved = app.preferences.load_all()
     except (ValueError, OSError):
-        saved = ''
-        notice = '原设置无法读取；可重新选择目录并保存。'
-    ttk.Label(pane, text=notice, wraplength=620, foreground=MUTED).pack(anchor='w', pady=12)
-    folder = app.field(pane, '本地目录（留空使用本机用户目录）', saved)
-    def choose():
-        initial = ''
-        if folder.get().strip():
-            ok, initial = app.attempt(lambda: str(local_path(folder.get().strip(), directory=True)), win)
-            if not ok: return
-        path = filedialog.askdirectory(parent=win, title='选择默认导出目录（非云同步目录）', initialdir=initial)
-        if path:
-            folder.delete(0, 'end'); folder.insert(0, path)
-    row = ttk.Frame(pane); row.pack(fill='x', pady=12)
-    ttk.Button(row, text='选择本地目录', command=choose).pack(side='left')
-    ttk.Button(row, text='清除默认目录', command=lambda: folder.delete(0, 'end')).pack(side='left', padx=10)
-    ttk.Label(pane, text='设置仅在当前用户的本机保存，不保存密钥或口令。目录不能是网络共享或链接。文件默认以密钥名称命名，已有文件不会覆盖。', wraplength=620, foreground=MUTED).pack(anchor='w', pady=12)
+        saved = {}
+    fields = {}
+    for key, title in (('export_directory', '密钥导出'), ('vault_directory', '密钥库保存 / 打开'), ('import_directory', '密钥导入')):
+        group = ttk.Frame(pane); group.pack(fill='x', pady=(10, 4))
+        ttk.Label(group, text=title, font=(UI_FONT, 10, 'bold')).pack(anchor='w', pady=(0, 7))
+        row = ttk.Frame(group); row.pack(fill='x')
+        entry = ttk.Entry(row); entry.insert(0, saved.get(key, ''))
+        entry.pack(side='left', fill='x', expand=True)
+        fields[key] = entry
+        state = ttk.Label(group, text='', foreground=MUTED, font=(UI_FONT, 9))
+        state.pack(anchor='w', pady=(4, 0))
+        variable = tk.StringVar(win, value=entry.get())
+        entry.configure(textvariable=variable); entry.path_variable = variable
+        def validate(*args, field=entry, label=state):
+            value = field.get().strip()
+            if not value: label.configure(text='使用本机用户目录'); return
+            try:
+                path = local_path(value, directory=True)
+                label.configure(text='目录可用' if path.is_dir() else '目录尚不存在')
+            except (ValueError, OSError):
+                label.configure(text='路径尚不完整或不是允许的本地目录')
+        variable.trace_add('write', validate); validate()
+        def choose(field=entry):
+            initial = ''
+            if field.get().strip():
+                try:
+                    path = local_path(field.get().strip(), directory=True)
+                    if path.is_dir(): initial = str(path)
+                except (ValueError, OSError): pass
+            path = filedialog.askdirectory(parent=win, title='选择默认本地目录（非云同步目录）', initialdir=initial)
+            if path: field.delete(0, 'end'); field.insert(0, path)
+        ttk.Button(row, text='选择目录', width=8, command=choose).pack(side='right', padx=(10, 0))
+    ttk.Label(pane, text='仅在本机保存路径，不含密钥或口令。', foreground=MUTED, font=(UI_FONT, 9)).pack(anchor='w', pady=(18, 0))
     def save():
-        ok, _ = app.attempt(lambda: app.preferences.save(folder.get().strip()), win)
+        ok, _ = app.attempt(lambda: app.preferences.save_all(**{key: field.get() for key, field in fields.items()}), win)
         if ok:
             win.destroy()
-            messagebox.showinfo('设置已保存', '默认导出目录已保存，重启后仍然生效。', parent=app.root)
-    ttk.Button(win.actions, text='保存导出设置', style='Accent.TButton', command=save).pack(side='right')
-    ttk.Button(win.actions, text='取消', command=win.destroy).pack(side='left')
+            messagebox.showinfo('设置已保存', '三个默认目录已保存。', parent=app.root)
+    ttk.Button(win.actions, text='保存路径设置', style='Accent.TButton', command=save).pack(side='right')
+    ttk.Button(win.actions, text='取消', command=win.destroy).pack(side='right', padx=(0, 8))
 
 
 def show_pair_check(app):
     from .app import UI_FONT, MUTED
     from .paircheck import compare, PairCheckError
     win, pane = app.dialog('公钥 / 私钥配对校验', 940, 740)
-    win.minsize(min(820, win.winfo_screenwidth() - 80), min(620, win.winfo_screenheight() - 130))
     ttk.Label(pane, text='这两把密钥是否匹配？', font=(UI_FONT, 20, 'bold')).pack(anchor='w')
     ttk.Label(pane, text='本机导出的私钥默认加密，请填写导出时设置的口令。格式读取失败不等于密钥不匹配。', foreground=MUTED, wraplength=820).pack(anchor='w', pady=(8, 10))
     mode = ttk.Combobox(pane, state='readonly', values=('自动识别格式', 'X25519 原始 Base64 / Base64url'))
@@ -53,6 +69,8 @@ def show_pair_check(app):
     columns.columnconfigure(0, weight=1, uniform='input'); columns.columnconfigure(1, weight=1, uniform='input')
     left_pane = ttk.Frame(columns); left_pane.grid(row=0, column=0, sticky='nsew', padx=(0, 12))
     right_pane = ttk.Frame(columns); right_pane.grid(row=0, column=1, sticky='nsew', padx=(12, 0))
+    from .widgets import responsive_columns
+    responsive_columns(columns, left_pane, right_pane)
     ttk.Label(left_pane, text='01  公钥 / 证书', font=(UI_FONT, 12, 'bold')).pack(anchor='w')
     public = app.textfield(left_pane, '粘贴完整文本，或选择本地文件', height=5)
     public.configure(width=1)
@@ -60,13 +78,15 @@ def show_pair_check(app):
     public_label = ttk.Label(left_pane, text='尚未选择公钥文件', foreground=MUTED, wraplength=360)
     public_label.pack(anchor='w', pady=6)
     private = None
-    result = ttk.Label(win.actions, text='等待校验', wraplength=840, foreground=MUTED)
+    result = ttk.Label(pane, text='等待校验', wraplength=840, foreground=MUTED)
     clearing = [False]
     def invalidate(event=None):
         if not clearing[0]:
             result.configure(text='输入已改变，请重新校验', foreground=MUTED)
     def choose(is_private):
-        path = filedialog.askopenfilename(parent=win, title='选择私钥文件' if is_private else '选择公钥或证书文件', filetypes=[('密钥文件', '*.*')])
+        ok, initial = app.attempt(lambda: app.preferences.directory('import'), win)
+        if not ok: return
+        path = filedialog.askopenfilename(parent=win, initialdir=initial, title='选择私钥文件' if is_private else '选择公钥或证书文件', filetypes=[('密钥文件', '*.*')])
         if path:
             if is_private:
                 private_path.set(path); private.delete(0, 'end'); private_label.configure(text=Path(path).name)
