@@ -18,7 +18,11 @@ class PKCS11Token:
             actual = hashlib.sha256(data).hexdigest()
             if not isinstance(expected_sha256, str) or actual != expected_sha256.lower():
                 raise ValueError('PKCS#11 驱动摘要不匹配')
-            import PyKCS11
+            try:
+                import PyKCS11
+            except ModuleNotFoundError as error:
+                if error.name != 'PyKCS11': raise
+                raise ValueError('标准安装包未捆绑 PyKCS11 硬件令牌依赖。请按 README 使用离线依赖构建本地令牌版本；不要直接修改已校验的安装目录。') from None
             self.api = PyKCS11
             self.library = PyKCS11.PyKCS11Lib()
             self.library.load(str(path))

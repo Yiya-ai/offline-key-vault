@@ -80,3 +80,21 @@ def test_linked_source_rejected(tmp_path):
     os.link(root / 'main.py', root / 'alias.py')
     with pytest.raises(release.ReleaseError, match='Hard-linked'):
         release.audit(root)
+
+
+def test_binary_notices_survive_missing_record_without_shipping_private_metadata(tmp_path):
+    import importlib.metadata
+    from build_portable import copy_distribution_metadata
+    site = tmp_path / 'site'; info = site / 'synthetic-1.0.dist-info'; info.mkdir(parents=True)
+    (info / 'METADATA').write_text('Name: synthetic\nVersion: 1.0\n', encoding='utf-8')
+    (info / 'LICENSE').write_text('synthetic license fixture', encoding='utf-8')
+    (info / 'direct_url.json').write_text('{"url":"local-private-location"}', encoding='utf-8')
+    dist = next(importlib.metadata.distributions(path=[str(site)]))
+    assert dist.files is None
+    output = tmp_path / 'output'
+    copy_distribution_metadata(dist, output)
+    assert (output / info.name / 'LICENSE').read_bytes() == (info / 'LICENSE').read_bytes()
+    assert not (output / info.name / 'direct_url.json').exists()
+    (info / 'LICENSE').unlink()
+    with pytest.raises(RuntimeError, match='Missing dependency license'):
+        copy_distribution_metadata(dist, tmp_path / 'refused')

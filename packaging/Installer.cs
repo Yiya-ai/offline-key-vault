@@ -65,6 +65,22 @@ internal static class Installer {
             if (process.ExitCode!=0) throw new IOException("安装包自检失败，未创建快捷方式。");
         }
     }
+    static FileStream OpenNewOutput(string output) {
+        // A temporarily unavailable destination can deny creation before a file exists.
+        // Retry only opening a new file, never truncate an existing/partial output.
+        for(int attempt=0;;attempt++) {
+            CheckLocal(Path.GetDirectoryName(output));
+            if(File.Exists(output)||Directory.Exists(output)) throw new IOException("目标文件已存在，未覆盖。");
+            try { return new FileStream(output,FileMode.CreateNew,FileAccess.Write,FileShare.None); }
+            catch(Exception error) {
+                int code=error.HResult & 0xffff;
+                bool transient=(error is UnauthorizedAccessException && code==5) ||
+                    (error is IOException && (code==5||code==32||code==33));
+                if(!transient || attempt>=5) throw;
+                System.Threading.Thread.Sleep(100 * (1 << attempt));
+            }
+        }
+    }
     static string Extract(string destination, bool fullTest) {
         destination=CheckLocal(destination);
         if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("目标已存在。请选择新的安装文件夹，避免覆盖旧程序和密钥。");
@@ -89,7 +105,10 @@ internal static class Installer {
                     total+=entry.Length;
                     if (entry.Length>128*1024*1024 || total>512L*1024*1024 || seen.Count>10000) throw new IOException("安装包超出资源上限。");
                     Directory.CreateDirectory(Path.GetDirectoryName(output)); CheckLocal(Path.GetDirectoryName(output));
-                    using(var source=entry.Open()) using(var stream=new FileStream(output,FileMode.CreateNew,FileAccess.Write,FileShare.None)) source.CopyTo(stream);
+                    var outputPins=Pin(Path.GetDirectoryName(output));
+                    try {
+                        using(var source=entry.Open()) using(var stream=OpenNewOutput(output)) source.CopyTo(stream);
+                    } finally { foreach(var h in outputPins) h.Dispose(); }
                 }
             }
             Verify(stage, "--verify");
@@ -217,14 +236,17 @@ internal static class Installer {
     }
     [STAThread] static int Main(string[] args) {
         if(args.Length==2 && args[0]=="--test-install") {
+            Console.SetError(new StreamWriter(Console.OpenStandardError(),new UTF8Encoding(false)){AutoFlush=true});
             try {
                 string dest=Extract(args[1],true);
-                Shortcut(Path.Combine(dest,"shortcut-test"),dest,"OfflineKeyVault-Test");
+                // Test artifacts belong outside the immutable application payload.
+                Shortcut(Path.Combine(Path.GetDirectoryName(dest),"shortcut-test"),dest,"OfflineKeyVault-Test");
+                Verify(dest,"--verify");
                 bool rejected=false;
                 try { Extract(dest,false); } catch(IOException) { rejected=true; }
                 if(!rejected) return 2;
                 return 0;
-            } catch(Exception error) {Console.Error.WriteLine("Installer test failed: "+error.GetType().Name+": "+error.Message);return 1;}
+            } catch(Exception error) {Console.Error.WriteLine("Installer test failed: "+error.GetType().Name+" (0x"+error.HResult.ToString("X8")+"): "+error.Message);return 1;}
         }
         if(args.Length!=0)return 2;
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);

@@ -11,7 +11,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from build_portable import APP_FILES, PACKAGES, MODULES, copy_file, copy_tree, digest, checked
+from build_portable import APP_FILES, PACKAGES, MODULES, copy_file, copy_tree, digest, checked, copy_distribution_metadata
 PYINSTALLER_VERSION = '6.16.0'
 
 
@@ -84,13 +84,7 @@ def main():
     for name, dist in installed.items():
         if name not in PACKAGES:
             continue
-        for item in dist.files or ():
-            if any('license' in part.lower() or part.lower().startswith('copying') for part in item.parts):
-                if item.is_absolute() or '..' in item.parts:
-                    raise RuntimeError('Unsafe dependency license path')
-                source = Path(dist.locate_file(item))
-                if source.is_file():
-                    copy_file(source, resources / 'licenses' / name / Path(*item.parts))
+        copy_distribution_metadata(dist, resources / 'licenses' / name)
     # Ad-hoc signing is entirely local; it is not Developer ID signing/notarization.
     command(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', '--timestamp=none', app], cwd=work, env=env)
     command(['/usr/bin/codesign', '--verify', '--deep', '--strict', app], cwd=work, env=env)

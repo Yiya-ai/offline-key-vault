@@ -11,9 +11,9 @@ The application has no upload, telemetry, online update or automatic dependency-
 | Component | Status |
 | --- | --- |
 | Windows x64 | Locally tested with CPython 3.12 and Tk; intended for Windows 10/11 x64. Clean installations of every target OS have not been tested. |
-| Windows portable package | Built and tested locally after extraction. Bundled-dependency license review remains a prerequisite for public binary distribution. |
+| Windows portable package | Built and tested locally after extraction. The public standard profile excludes PyKCS11 and retains bundled license notices. |
 | macOS | Experimental build scripts for Apple Silicon and Intel; no package verified on a real Mac. Use synthetic data only. |
-| Hardware tokens | Generic PKCS#11 interface with simulated-session tests; no physical device validation. |
+| Hardware tokens | Generic PKCS#11 interface retained; standard Windows binaries omit PyKCS11. Offline source setup is required; no physical-device validation. |
 | Security assurance | Local tests and source review, not an independent security audit or a guarantee against all vulnerabilities. |
 
 ## Features
@@ -87,11 +87,13 @@ For experimental macOS builds, consult [MACOS.md](MACOS.md) (Chinese). Windows b
 
 ## Desktop installer and interaction improvements
 
-Latest verification (2026-10-31): the security fixes passed source tests and extracted portable-package checks. Rebuilding the installer still fails with access denied while extracting `runtime/vcruntime140.dll`; the cause is unresolved. An older installer does not contain the latest fixes. Use the current source or verified portable build until installer verification succeeds. No new public binary release is implied.
+The Windows standard installer uses bounded retries when creating a new output file temporarily returns access denied or a sharing error. It never overwrites an existing file, never retries a partially written stream, and fails if access remains denied. The earlier intermittent failure could not be reproduced consistently; no antivirus or system protection change is required. Published versions and verified download assets are listed in [GitHub Releases](https://github.com/Yiya-ai/offline-key-vault/releases).
 
 On Windows, open `dist/offline-key-vault-setup.exe`. Choose a new local installation folder (typing or local directory browsing) and select whether to create desktop and Start menu shortcuts. Installation is offline and per-user, with no administrator requirement. Existing folders and shortcuts are never overwritten; upgrades use a new folder and reopen the existing vault. The installer does not launch the application automatically. To remove a version, first move any vaults/exports you placed inside it, then remove that application folder and its shortcuts. There is no system-service or registry installation.
 
 Build the portable ZIP first, then run `python -I -S build_installer.py`, or use `build_installer.cmd` for both steps. The builder tests actual extraction, installed-runtime checks, shortcut targets and overwrite refusal inside an isolated test directory; it does not create real desktop shortcuts during verification. The installer is unsigned and retains the same third-party distribution-license requirements as the portable bundle.
+
+The public standard package does **not** bundle PyKCS11. For hardware tokens, prepare the pinned dependency from trusted offline wheels and build a local portable version with `python -I -S build_portable.py --with-pkcs11`. It produces a separate `-local-pkcs11.zip` artifact; its GPL distribution obligations must be handled separately before sharing. Do not copy dependencies directly into an installed standard package: its integrity check rejects extra files. The application does not download optional dependencies.
 
 Settings now provide separate vault, key-import and key-export directories. Path inputs refresh local directory listings after a short typing delay; no Go click is required. Saving a dialog always resolves the latest typed path. Password/PIN fields start masked and use an inline eye icon; moving focus outside the field and its eye control masks the value again. Mouse wheels scroll the control under the pointer or its surrounding form.
 

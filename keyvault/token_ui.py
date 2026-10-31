@@ -1,6 +1,7 @@
 """Explicit opt-in interface for a locally supplied PKCS#11 driver."""
 import hashlib
 import os
+import importlib.util
 import tkinter as tk
 from tkinter import ttk, messagebox
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -24,7 +25,8 @@ def show(app):
     digest_row = ttk.Frame(pane); digest_row.pack(fill='x')
     digest = ttk.Entry(digest_row); digest.pack(side='left', fill='x', expand=True)
     state = {'token': None, 'slots': [], 'keys': []}
-    status = ttk.Label(pane, text='尚未连接设备', foreground=MUTED, font=(UI_FONT, 9)); status.pack(anchor='w', pady=(6, 0))
+    dependency_ready = importlib.util.find_spec('PyKCS11') is not None
+    status = ttk.Label(pane, text='尚未连接设备' if dependency_ready else '标准版：未配置硬件令牌依赖，离线配置方法见 README', foreground=MUTED, font=(UI_FONT, 9)); status.pack(anchor='w', pady=(6, 0))
     ttk.Separator(pane).pack(fill='x', pady=10)
     columns = ttk.Frame(pane); columns.pack(fill='x')
     left = ttk.Frame(columns); right = ttk.Frame(columns)

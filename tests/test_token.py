@@ -49,3 +49,12 @@ def test_failed_login_is_not_retried():
 def test_driver_digest_checked_before_loading(tmp_path):
     path = tmp_path / 'fake.dll'; path.write_bytes(b'not a module')
     with pytest.raises(ValueError, match='SHA|摘要'): PKCS11Token(path, '0' * 64)
+
+
+def test_standard_package_reports_optional_dependency_without_loading_driver(tmp_path, monkeypatch):
+    import sys
+    import hashlib
+    path = tmp_path / 'synthetic.dll'; path.write_bytes(b'not executable')
+    monkeypatch.setitem(sys.modules, 'PyKCS11', None)
+    with pytest.raises(ValueError, match='标准安装包未捆绑'):
+        PKCS11Token(path, hashlib.sha256(path.read_bytes()).hexdigest())

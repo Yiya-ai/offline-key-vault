@@ -1,5 +1,7 @@
 """Build a Windows x64 portable package using installed files only. Never downloads."""
 import hashlib
+import argparse
+import email
 import importlib.metadata as metadata
 import json
 import os
@@ -61,6 +63,30 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def copy_distribution_metadata(dist, destination):
+    """Retain notices even when an offline vendor installation has no RECORD."""
+    normalize = lambda value: value.lower().replace('_', '-')
+    expected = normalize(dist.metadata['Name'])
+    matches = []
+    for candidate in Path(dist.locate_file('')).glob('*.dist-info'):
+        metadata_file = checked(candidate / 'METADATA')
+        info = email.message_from_bytes(metadata_file.read_bytes())
+        if normalize(info.get('Name', '')) == expected and info.get('Version') == dist.version:
+            matches.append(candidate)
+    if len(matches) != 1:
+        raise RuntimeError('Expected unique dependency metadata for ' + expected)
+    source = matches[0]
+    notices = []
+    def include(path):
+        parts = path.relative_to(source).parts
+        is_notice = any('license' in part.lower() or 'copying' in part.lower() or 'notice' in part.lower() for part in parts)
+        if is_notice: notices.append(path)
+        return is_notice or path.name in ('METADATA', 'WHEEL')
+    copy_tree(source, destination / source.name, include)
+    if not notices:
+        raise RuntimeError('Missing dependency license files: ' + expected)
+
+
 def clean_environment(temp):
     env = dict(os.environ)
     # Deliberately hostile values demonstrate that the launcher isolates them.
@@ -90,13 +116,17 @@ def run_checked(arguments, **kwargs):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--with-pkcs11', action='store_true', help='Local-only bundle with optional GPL PyKCS11 dependency; not the public standard installer')
+    options = parser.parse_args()
+    runtime_packages = {name: version for name, version in PACKAGES.items() if name != 'pykcs11' or options.with_pkcs11}
     if os.name != 'nt' or sys.version_info[:2] != (3, 12) or platform.machine().lower() not in ('amd64', 'x86_64') or sys.maxsize < 2**32:
         raise SystemExit('Build requires locally installed Windows x64 CPython 3.12 with Tk.')
     checked(ROOT)
     base = checked(Path(sys.base_prefix))
     site = Path(sysconfig.get_path('purelib'))
     installed = {dist.metadata['Name'].lower().replace('_', '-'): dist for dist in metadata.distributions(path=[str(site), str(ROOT / 'vendor')])}
-    for name, version in PACKAGES.items():
+    for name, version in runtime_packages.items():
         if name not in installed or installed[name].version != version:
             raise SystemExit('Missing local dependency: ' + name + '==' + version + '; no downloads attempted.')
     compiler = Path(os.environ['SystemRoot']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
@@ -114,22 +144,19 @@ def main():
     for name in ('python.exe', 'pythonw.exe', 'python3.dll', 'python312.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):
         copy_file(base / name, runtime / name)
     copy_file(base / 'LICENSE.txt', bundle / 'licenses/Python-LICENSE.txt')
+    copy_file(ROOT / 'packaging/licenses/Tcl-LICENSE.txt', bundle / 'licenses/Tcl-LICENSE.txt')
     copy_tree(base / 'Lib', runtime / 'Lib', lambda p: p.suffix == '.py', SKIP)
     copy_tree(base / 'DLLs', runtime / 'DLLs',
               lambda p: p.suffix in ('.dll', '.pyd') and not p.name.startswith(('_test', '_ctypes_test')))
     for name in ('tcl8', 'tcl8.6', 'tk8.6'):
         copy_tree(base / 'tcl' / name, runtime / 'tcl' / name)
-    for name in PACKAGES:
+    for name in runtime_packages:
         dist = installed[name]
         package_site = Path(dist.locate_file(''))
         module = MODULES[name]
         copy_tree(package_site / module, runtime / 'Lib/site-packages' / module,
-                  lambda p: p.suffix in ('.py', '.pyd', '.dll') or p.name == 'py.typed', {'__pycache__', 'tests'})
-        for item in dist.files or ():
-            if item.is_absolute() or '..' in item.parts:
-                continue
-            if any(part.endswith('.dist-info') for part in item.parts) and (item.name in ('METADATA', 'WHEEL') or any('license' in part.lower() or 'copying' in part.lower() for part in item.parts)):
-                copy_file(dist.locate_file(item), runtime / 'Lib/site-packages' / Path(*item.parts))
+                  lambda p: p.suffix in ('.py', '.pyd', '.dll') or p.name == 'py.typed', {'__pycache__', 'tests', 'SelfTest'})
+        copy_distribution_metadata(dist, runtime / 'Lib/site-packages')
     jks_init = runtime / 'Lib/site-packages/jks/__init__.py'
     jks_init.write_text(jks_init.read_text(encoding='utf-8').replace('from .bks import *', '# BKS is intentionally not loaded'), encoding='utf-8')
     native = list(Path(installed['cffi'].locate_file('')).glob('_cffi_backend*.pyd'))
@@ -157,7 +184,8 @@ def main():
         'Windows x64 本机验证完成；未在干净的 Windows 10/11 虚拟机上逐一测试。\n'
         '第三方许可证随包保存于 licenses、runtime/tcl 和各依赖 dist-info 目录。\n'
         '严格物理离线需求请在断网设备运行；详情及格式限制见 README.md。\n', encoding='utf-8-sig')
-    build_info = {'platform': 'windows-x64', 'python': platform.python_version(), 'packages': PACKAGES,
+    build_info = {'platform': 'windows-x64', 'python': platform.python_version(), 'packages': runtime_packages,
+                  'profile': 'local-pkcs11' if options.with_pkcs11 else 'standard',
                   'build': 'local-files-only', 'source_files': list(APP_FILES)}
     (bundle / 'build-info.json').write_text(json.dumps(build_info, indent=2) + '\n', encoding='utf-8')
     files = sorted(p for p in bundle.rglob('*') if p.is_file())
@@ -170,7 +198,7 @@ def main():
     launcher_source.write_text(template.replace('__MANIFEST_SHA256__', digest(manifest)), encoding='utf-8')
     run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
                  '/r:System.Windows.Forms.dll', '/out:' + str(launcher), launcher_source])
-    temporary_zip = work / 'offline-key-vault-windows-x64.zip'
+    temporary_zip = work / ('offline-key-vault-windows-x64-local-pkcs11.zip' if options.with_pkcs11 else 'offline-key-vault-windows-x64.zip')
     with zipfile.ZipFile(temporary_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path in sorted(p for p in bundle.rglob('*') if p.is_file()):
             archive.write(path, 'OfflineKeyVault/' + path.relative_to(bundle).as_posix())

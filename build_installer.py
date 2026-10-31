@@ -22,6 +22,11 @@ def main():
     # Reject stale bundles so installer always contains the current application.
     from build_portable import APP_FILES
     with zipfile.ZipFile(archive) as z:
+        info = json.loads(z.read('OfflineKeyVault/build-info.json'))
+        if info.get('profile') != 'standard' or 'pykcs11' in info.get('packages', {}):
+            raise SystemExit('Public installer requires a freshly verified standard portable build without PyKCS11.')
+        if any('pykcs11' in name.lower() for name in z.namelist()):
+            raise SystemExit('Unexpected PyKCS11 files in standard installer payload.')
         for name in APP_FILES:
             if z.read('OfflineKeyVault/app/' + name) != (ROOT / name).read_bytes():
                 raise SystemExit('Rebuild the portable ZIP before building the installer.')
@@ -36,7 +41,7 @@ def main():
     installed = work / '安装 验证'
     print('Testing actual install, shortcut target, runtime and overwrite refusal...', flush=True)
     run_checked([output, '--test-install', installed], cwd=work)
-    if not (installed / 'shortcut-test/OfflineKeyVault-Test.lnk').is_file():
+    if not (work / 'shortcut-test/OfflineKeyVault-Test.lnk').is_file():
         raise RuntimeError('Shortcut verification failed')
     target = ROOT / 'dist' / output.name
     if target.exists(): checked(target)

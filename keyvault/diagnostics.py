@@ -19,7 +19,12 @@ def run():
     from .vault import Vault, AuthenticationError, VaultDestroyed
     from .app import Application
     import cryptography, bcrypt, asn1crypto, cffi, pycparser, _tkinter
-    import pgpy, jks, Cryptodome, argon2, PyKCS11, pyasn1, pyasn1_modules, javaobj, _argon2_cffi_bindings
+    import pgpy, jks, Cryptodome, argon2, pyasn1, pyasn1_modules, javaobj, _argon2_cffi_bindings
+    try:
+        import PyKCS11
+    except ModuleNotFoundError as error:
+        if error.name != 'PyKCS11': raise
+        PyKCS11 = None
     frozen = bool(getattr(sys, 'frozen', False))
     portable = frozen or (Path(sys.executable).parent / 'python312._pth').is_file()
     if portable:
@@ -27,6 +32,7 @@ def run():
         for path in sys.path:
             require(Path(path).resolve().is_relative_to(bundle), 'External import path')
         for module in (cryptography, bcrypt, asn1crypto, cffi, pycparser, _tkinter, tk, json, pgpy, jks, Cryptodome, argon2, PyKCS11, pyasn1, pyasn1_modules, javaobj, _argon2_cffi_bindings):
+            if module is None: continue
             require(Path(module.__file__).resolve().is_relative_to(bundle), 'External runtime module')
     try:
         sock = socket.socket()
@@ -126,4 +132,4 @@ def run():
     app.quit()
     require(not errors, 'GUI callback failed')
     print(json.dumps({'ok': True, 'portable': portable, 'algorithms': len(keys.ALGORITHMS),
-                      'ssh': True, 'ppk': True, 'jks': True, 'p12': True, 'pkcs11_module': True, 'vault': True, 'two_factor_recovery': True, 'self_destruction': True, 'gui': True, 'key_pair_check': True, 'pair_password_diagnostic': True, 'export_preferences': True, 'network_blocked': True}))
+                      'ssh': True, 'ppk': True, 'jks': True, 'p12': True, 'pkcs11_module': PyKCS11 is not None, 'vault': True, 'two_factor_recovery': True, 'self_destruction': True, 'gui': True, 'key_pair_check': True, 'pair_password_diagnostic': True, 'export_preferences': True, 'network_blocked': True}))
