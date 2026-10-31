@@ -110,7 +110,11 @@ def main():
     arguments.extend(['--add-binary', str(support) + ':.', '--exclude-module', 'PyKCS11',
                       '--exclude-module', 'Cryptodome.SelfTest', '--exclude-module', 'pytest'])
     for package in runtime_packages:
-        arguments.extend(['--collect-all', MODULES[package]])
+        if package == 'pycryptodomex':
+            # collect-all copies SelfTest sources as data even with exclude-module.
+            arguments.extend(['--collect-submodules', 'Cryptodome', '--collect-binaries', 'Cryptodome'])
+        else:
+            arguments.extend(['--collect-all', MODULES[package]])
     candidates = [Path('/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib'), Path('/usr/local/opt/openssl@3/lib/libcrypto.3.dylib'), Path(sys.base_prefix) / 'lib/libcrypto.3.dylib']
     crypto = next((p for p in candidates if p.is_file()), None)
     if crypto is None: raise SystemExit('A local OpenSSL 3 shared library is required; no downloads attempted.')
