@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import time
 import os
+import sys
 from pathlib import Path, PureWindowsPath
 from contextlib import contextmanager
 import stat
@@ -29,6 +30,9 @@ def _lexical_path(value):
             if part.endswith((' ', '.')) or any(c in part for c in '<>:"|?*') or PureWindowsPath(part).is_reserved():
                 raise StorageError('不允许设备名称、备用数据流或含歧义的文件名')
     p = Path(os.path.abspath(raw))
+    if sys.platform == 'darwin':
+        from .macos_storage import check_path
+        check_path(p)
     if os.name == 'nt':
         if str(p).startswith(chr(92) * 2) or ctypes.windll.kernel32.GetDriveTypeW(str(p.anchor)) not in (2, 3, 6):
             raise StorageError('只允许本地磁盘，不允许网络或设备路径')
@@ -192,6 +196,13 @@ def private_fd(path, existing=False):
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             os.close(fd)
             raise StorageError('不允许非普通文件或硬链接')
+        if sys.platform == 'darwin':
+            try:
+                from .macos_storage import restrict_fd
+                restrict_fd(fd)
+            except BaseException:
+                os.close(fd)
+                raise
         return fd
 
 
@@ -228,6 +239,9 @@ def opened_local(path):
         else:
             fd = os.open(p, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
         with os.fdopen(fd, 'rb') as stream:
+            if sys.platform == 'darwin':
+                from .macos_storage import check_fd
+                check_fd(stream.fileno())
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise StorageError('只允许独立的普通文件')

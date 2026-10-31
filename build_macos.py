@@ -1,4 +1,5 @@
-"""EXPERIMENTAL macOS-only offline build. Must be validated on real Macs."""
+"""Build and verify an offline standard macOS DMG on its native architecture."""
+import argparse
 import importlib.metadata as metadata
 import json
 import os
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import plistlib
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -26,6 +28,14 @@ def command(arguments, *, cwd, env):
 def main():
     if sys.platform != 'darwin':
         raise SystemExit('macOS build requires a real Mac; Windows cannot produce a verified .app. No downloads attempted.')
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--prepare-only', action='store_true')
+    options = parser.parse_args()
+    (ROOT / 'build').mkdir(exist_ok=True)
+    support = ROOT / 'build/libokv_storage.dylib'
+    subprocess.run(['/usr/bin/clang', '-dynamiclib', '-Wall', '-Wextra', '-Werror',
+                    '-mmacosx-version-min=15.0', '-o', str(support), str(ROOT / 'packaging/macos_storage.c')], check=True)
+    if options.prepare_only: return
     if sys.version_info[:2] != (3, 12):
         raise SystemExit('Use a locally installed CPython 3.12 with Tk support.')
     architecture = platform.machine()
@@ -33,11 +43,12 @@ def main():
         raise SystemExit('Unsupported interpreter architecture: ' + architecture)
     site = Path(sysconfig.get_path('purelib')).resolve()
     installed = {dist.metadata['Name'].lower().replace('_', '-'): dist for dist in metadata.distributions(path=[str(site)])}
-    required = dict(PACKAGES, pyinstaller=PYINSTALLER_VERSION)
+    runtime_packages = {name: version for name, version in PACKAGES.items() if name != 'pykcs11'}
+    required = dict(runtime_packages, pyinstaller=PYINSTALLER_VERSION)
     for name, version in required.items():
         if name not in installed or installed[name].version != version:
             raise SystemExit('Missing local dependency: ' + name + '==' + version + '; no downloads attempted.')
-    for binary in ('/usr/bin/ditto', '/usr/bin/codesign'):
+    for binary in ('/usr/bin/ditto', '/usr/bin/codesign', '/usr/bin/hdiutil'):
         if not Path(binary).is_file():
             raise SystemExit('Missing local macOS tool: ' + binary)
     (ROOT / 'build').mkdir(exist_ok=True)
@@ -65,7 +76,9 @@ def main():
                  '--workpath', work / 'analysis', '--specpath', work,
                  '--runtime-hook', stage / 'macos_runtime_hook.py', '--paths', stage, '--paths', stage / 'vendor',
                  '--hidden-import', '_cffi_backend']
-    for package in PACKAGES:
+    arguments.extend(['--add-binary', str(support) + ':.', '--exclude-module', 'PyKCS11',
+                      '--exclude-module', 'Cryptodome.SelfTest', '--exclude-module', 'pytest'])
+    for package in runtime_packages:
         arguments.extend(['--collect-all', MODULES[package]])
     candidates = [Path('/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib'), Path('/usr/local/opt/openssl@3/lib/libcrypto.3.dylib'), Path(sys.base_prefix) / 'lib/libcrypto.3.dylib']
     crypto = next((p for p in candidates if p.is_file()), None)
@@ -82,13 +95,26 @@ def main():
     for name in ('README.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'MACOS.md', 'COMPATIBILITY.md', 'SECURITY_RECOVERY.md', 'requirements.txt', 'LICENSE', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md', 'RELEASING.md'):
         copy_file(ROOT / name, resources / name)
     for name, dist in installed.items():
-        if name not in PACKAGES:
+        if name not in runtime_packages and name != 'pyinstaller':
             continue
         copy_distribution_metadata(dist, resources / 'licenses' / name)
+    python_license = next((p for p in (Path(sys.base_prefix) / 'LICENSE.txt',
+                          Path(sys.base_prefix) / 'lib/python3.12/LICENSE.txt') if p.is_file()), None)
+    if python_license is not None: copy_file(python_license, resources / 'licenses/Python-LICENSE.txt')
+    copy_file(ROOT / 'packaging/licenses/Tcl-LICENSE.txt', resources / 'licenses/Tcl-LICENSE.txt')
+    # The native OpenSSL bridge is collected independently from cryptography.
+    openssl_license = crypto.parent.parent / 'LICENSE.txt'
+    if not openssl_license.is_file(): openssl_license = crypto.parent.parent / 'LICENSE'
+    if not openssl_license.is_file(): raise RuntimeError('Missing bundled OpenSSL license')
+    copy_file(openssl_license, resources / 'licenses/OpenSSL-LICENSE.txt')
+    info_path = app / 'Contents/Info.plist'
+    with info_path.open('rb') as stream: info = plistlib.load(stream)
+    info.update(LSMinimumSystemVersion='15.0', CFBundleShortVersionString='0.2.1', CFBundleVersion='0.2.1')
+    with info_path.open('wb') as stream: plistlib.dump(info, stream)
     # Ad-hoc signing is entirely local; it is not Developer ID signing/notarization.
     command(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', '--timestamp=none', app], cwd=work, env=env)
     command(['/usr/bin/codesign', '--verify', '--deep', '--strict', app], cwd=work, env=env)
-    archive = work / ('offline-key-vault-macos-' + architecture + '-experimental.zip')
+    archive = work / ('offline-key-vault-macos-' + architecture + '.zip')
     command(['/usr/bin/ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app, archive], cwd=work, env=env)
     relocated = work / '离线 解压验证'
     relocated.mkdir()
@@ -110,18 +136,47 @@ def main():
             reports.append(report)
     if not reports:
         raise RuntimeError('Packaged self-test did not report success; artifact will not be published.')
+    # Read-only DMG install flow: mount, copy the app to a clean directory, launch it.
+    dmg_source = work / 'dmg-source'; dmg_source.mkdir()
+    command(['/usr/bin/ditto', app, dmg_source / app.name], cwd=work, env=env)
+    (dmg_source / 'Applications').symlink_to('/Applications', target_is_directory=True)
+    (dmg_source / 'INSTALL.txt').write_text(
+        'Drag OfflineKeyVault.app into Applications. macOS 15 or later.\n'
+        'This build is ad-hoc signed, not Developer ID signed or notarized.\n'
+        'Use macOS Privacy & Security to explicitly approve trusted software if requested; do not disable Gatekeeper.\n'
+        'Standard build: no bundled PyKCS11; hardware token setup is optional and offline.\n', encoding='utf-8')
+    dmg = work / ('offline-key-vault-macos-' + architecture + '.dmg')
+    command(['/usr/bin/hdiutil', 'create', '-quiet', '-format', 'UDZO', '-volname', 'Offline Key Vault',
+             '-srcfolder', dmg_source, dmg], cwd=work, env=env)
+    mount = work / 'mounted'; mount.mkdir()
+    command(['/usr/bin/hdiutil', 'attach', '-readonly', '-nobrowse', '-mountpoint', mount, dmg], cwd=work, env=env)
+    try:
+        installed_app = work / 'installed/OfflineKeyVault.app'
+        command(['/usr/bin/ditto', mount / app.name, installed_app], cwd=work, env=env)
+        command(['/usr/bin/codesign', '--verify', '--deep', '--strict', installed_app], cwd=work, env=env)
+        output = command([installed_app / 'Contents/MacOS/OfflineKeyVault', '--self-test'], cwd=work, env=test_env)
+        if not any(json.loads(line).get('ok') is True for line in output.splitlines() if line.startswith('{')):
+            raise RuntimeError('DMG installed application self-test failed')
+        command(['/usr/bin/open', '-W', '-n', installed_app, '--args', '--self-test'], cwd=work, env=test_env)
+    finally:
+        command(['/usr/bin/hdiutil', 'detach', mount], cwd=work, env=env)
     destination = ROOT / 'dist'
     destination.mkdir(exist_ok=True)
     checked(destination)
-    target = destination / archive.name
+    target = destination / dmg.name
     if target.is_symlink() or target.with_suffix('.zip.sha256').is_symlink():
         raise RuntimeError('Output cannot be a symbolic link')
-    os.replace(archive, target)
-    target.with_suffix('.zip.sha256').write_text(digest(target) + '  ' + target.name + '\n', encoding='ascii')
-    (work / 'verification.json').write_text(json.dumps({'architecture': architecture, 'self_test': reports[-1],
-        'status': 'experimental; macOS storage security qualification still required'}, indent=2), encoding='utf-8')
+    os.replace(dmg, target)
+    target.with_suffix('.dmg.sha256').write_text(digest(target) + '  ' + target.name + '\n', encoding='ascii')
+    report = {'architecture': architecture, 'self_test': reports[-1], 'dmg_install_tested': True,
+              'codesign_verified': True, 'notarized': False, 'minimum_macos': '15.0',
+              'profile': 'standard', 'sha256': digest(target), 'files': []}
+    for path in sorted(app.rglob('*')):
+        if path.is_file() and not path.is_symlink():
+            report['files'].append({'path': path.relative_to(app).as_posix(), 'sha256': digest(path)})
+    (destination / ('macos-verification-' + architecture + '.json')).write_text(json.dumps(report, indent=2), encoding='utf-8')
     print('Local build and relocated smoke test passed: ' + str(target))
-    print('Experimental only: complete the macOS security checks in MACOS.md before using real keys.')
+    print('Ad-hoc signed only; no Developer ID signing or notarization.')
 
 
 if __name__ == '__main__':

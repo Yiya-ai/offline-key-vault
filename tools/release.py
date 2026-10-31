@@ -16,7 +16,7 @@ MANIFEST = 'tools/release_manifest.json'
 MAX_BYTES = 2 * 1024 * 1024
 PRIVATE_PARTS = frozenset({'.git', 'vendor', 'build', 'dist', 'exports', 'test-results',
                            '__pycache__', '.pytest_cache', '.venv', 'venv', 'wheelhouse'})
-SOURCE_SUFFIXES = frozenset({'.py', '.md', '.txt', '.cs', '.cmd', '.command', '.json', '.yml'})
+SOURCE_SUFFIXES = frozenset({'.py', '.md', '.txt', '.cs', '.c', '.cmd', '.command', '.json', '.yml'})
 SPECIAL_NAMES = frozenset({'LICENSE', '.gitignore', '.gitattributes'})
 PATTERNS = (
     ('personal-home-path', re.compile(r'(?:[A-Za-z]:[\\/]+Users[\\/]+|/(?:Users|home)/)[A-Za-z0-9_.-]+')),

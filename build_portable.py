@@ -23,6 +23,7 @@ PACKAGES = {'cryptography': '46.0.7', 'asn1crypto': '1.5.1', 'bcrypt': '5.0.0',
 MODULES = {name: name for name in PACKAGES}
 MODULES.update({'pycryptodomex': 'Cryptodome', 'pyjks': 'jks', 'argon2-cffi': 'argon2', 'argon2-cffi-bindings': '_argon2_cffi_bindings', 'pykcs11': 'PyKCS11', 'javaobj-py3': 'javaobj', 'pyasn1-modules': 'pyasn1_modules'})
 APP_FILES = ('launch.py', 'keyvault/__init__.py', 'keyvault/app.py', 'keyvault/offline.py',
+             'keyvault/macos_storage.py',
              'keyvault/safeio.py', 'keyvault/vault.py', 'keyvault/keys.py', 'keyvault/jwk.py',
              'keyvault/pbes2.py', 'keyvault/import_guard.py', 'keyvault/localdialog.py',
              'keyvault/diagnostics.py', 'keyvault/compat_import.py', 'keyvault/material.py', 'keyvault/native_crypto.py', 'keyvault/openpgp.py', 'keyvault/ppk.py', 'keyvault/token.py', 'keyvault/token_ui.py', 'keyvault/protection.py', 'keyvault/security_ui.py', 'keyvault/preferences.py', 'keyvault/paircheck.py', 'keyvault/tool_ui.py', 'keyvault/widgets.py', 'keyvault/window_resize.py', 'keyvault/conversion.py', 'keyvault/content_ui.py')
