@@ -98,7 +98,7 @@ def main():
         env.pop(name, None)
     env['PYTHONNOUSERSITE'] = '1'
     env['PYINSTALLER_CONFIG_DIR'] = str(work / 'cache')
-    probe = "import sys,json; sys.path.append(sys.argv[1]); import tkinter,cryptography,bcrypt,asn1crypto,cffi,pycparser; w=tkinter.Tk(); w.withdraw(); w.update(); print(json.dumps({'tcl':w.tk.eval('info library'),'tk':w.tk.eval('set tk_library')})); w.destroy()"
+    probe = "import sys,json; sys.path.append(sys.argv[1]); import tkinter,cryptography,bcrypt,asn1crypto,cffi,pycparser; w=tkinter.Tk(); w.withdraw(); w.update(); print(json.dumps({'tcl':w.tk.eval('info library'),'tk':w.tk.eval('set tk_library'),'tcl_version':w.tk.eval('info patchlevel'),'tk_version':w.tk.eval('package require Tk')})); w.destroy()"
     tk_paths = json.loads(command([sys.executable, '-I', '-S', '-c', probe, site], cwd=work, env=env).strip())
     driver = 'import sys; sys.path.insert(0,sys.argv.pop(1)); sys.path.append(sys.argv.pop(1)); from PyInstaller.__main__ import run; run()'
     arguments = [sys.executable, '-I', '-S', '-c', driver, stage / 'vendor', site, '--noconfirm', '--clean', '--windowed',
@@ -114,6 +114,7 @@ def main():
     candidates = [Path('/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib'), Path('/usr/local/opt/openssl@3/lib/libcrypto.3.dylib'), Path(sys.base_prefix) / 'lib/libcrypto.3.dylib']
     crypto = next((p for p in candidates if p.is_file()), None)
     if crypto is None: raise SystemExit('A local OpenSSL 3 shared library is required; no downloads attempted.')
+    crypto = crypto.resolve()  # Homebrew's opt entry is a version-selection symlink.
     arguments.extend(['--add-binary', str(crypto) + ':.'])
     legacy = crypto.parent / 'ossl-modules/legacy.dylib'
     if not legacy.is_file(): raise RuntimeError('Missing local OpenSSL legacy provider')
@@ -136,12 +137,17 @@ def main():
                           Path(sys.base_prefix) / 'lib/python3.12/LICENSE.txt') if p.is_file()), None)
     if python_license is None: raise RuntimeError('Missing bundled Python license')
     copy_file(python_license, resources / 'licenses/Python-LICENSE.txt')
-    for component, directory in tk_paths.items():
+    for component in ('tcl', 'tk'):
+        directory = tk_paths[component]
         script_dir = Path(directory).resolve()
         notice = next((p for folder in (script_dir, script_dir.parent, script_dir.parent.parent)
                        for name in ('license.terms', 'license', 'LICENSE', 'LICENSE.txt')
                        if (p := folder / name).is_file()), None)
-        if notice is None: raise RuntimeError('Missing local ' + component + ' license')
+        # The python.org 3.12.10 framework omits standalone Tcl/Tk notices.
+        # These exact upstream 8.6.15 notices are retained in the source release.
+        if notice is None and tk_paths[component + '_version'] == '8.6.15':
+            notice = ROOT / 'packaging/licenses' / (component.capitalize() + '-LICENSE.txt')
+        if notice is None: raise RuntimeError('Missing local ' + component + ' license for ' + tk_paths[component + '_version'])
         copy_file(notice, resources / 'licenses' / (component + '-LICENSE.txt'))
     # The native OpenSSL bridge is collected independently from cryptography.
     openssl_license = crypto.parent.parent / 'LICENSE.txt'

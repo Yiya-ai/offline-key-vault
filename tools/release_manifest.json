@@ -56,6 +56,7 @@
     "packaging/Installer.cs",
     "packaging/Launcher.cs",
     "packaging/licenses/Tcl-LICENSE.txt",
+    "packaging/licenses/Tk-LICENSE.txt",
     "packaging/macos_runtime_hook.py",
     "packaging/macos_storage.c",
     "prepare_vendor.py",
