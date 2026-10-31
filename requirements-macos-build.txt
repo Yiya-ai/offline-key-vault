@@ -1,2 +1,15 @@
--r requirements.txt
+# Standard public macOS build. Optional PyKCS11 is deliberately excluded.
+cryptography==46.0.7
+asn1crypto==1.5.1
+bcrypt==5.0.0
+cffi==2.0.0
+pycparser==3.0
+pycryptodomex==3.23.0
+pyasn1==0.6.3
+pgpy==0.6.0
+pyjks==20.0.0
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+javaobj-py3==0.6.1
+pyasn1-modules==0.4.2
 PyInstaller==6.16.0

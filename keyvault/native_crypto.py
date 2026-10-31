@@ -12,7 +12,9 @@ from cryptography.hazmat.primitives import serialization as S
 @lru_cache(maxsize=1)
 def lib():
     base = Path(sys.base_prefix)
-    if sys.platform == 'win32':
+    if getattr(sys, 'frozen', False):
+        candidates = [Path(sys._MEIPASS) / 'libcrypto.3.dylib']
+    elif sys.platform == 'win32':
         candidates = [base / 'DLLs/libcrypto-3.dll']
     else:
         candidates = [Path(getattr(sys, '_MEIPASS', base)) / 'libcrypto.3.dylib', base / 'lib/libcrypto.3.dylib', Path('/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib'), Path('/usr/local/opt/openssl@3/lib/libcrypto.3.dylib')]
@@ -34,6 +36,8 @@ def lib():
         'd2i_X509_ALGOR': (P, [P, P, L]), 'X509_ALGOR_free': (None, [P]),
         'PKCS12_pbe_crypt': (P, [P, C.c_char_p, I, P, I, P, P, I]),
         'CRYPTO_free': (None, [P, C.c_char_p, I]), 'OSSL_PROVIDER_load': (P, [P, C.c_char_p]),
+        'OPENSSL_init_crypto': (I, [C.c_uint64, P]),
+        'OSSL_PROVIDER_set_default_search_path': (I, [P, C.c_char_p]),
         'PKCS12_create': (P, [C.c_char_p, C.c_char_p, P, P, P, I, I, I, I, I]),
         'PKCS12_set_mac': (I, [P, C.c_char_p, I, P, I, I, P]), 'PKCS12_free': (None, [P]),
         'i2d_PKCS12': (I, [P, P]), 'EVP_sha256': (P, []),
@@ -41,7 +45,13 @@ def lib():
     }
     for name, (restype, argtypes) in signatures.items():
         fn = getattr(library, name); fn.restype = restype; fn.argtypes = argtypes
-    # These providers are resolved by the bundled OpenSSL; no user configuration is loaded.
+    if getattr(sys, 'frozen', False):
+        # Do not load machine-local configuration or providers from the build machine.
+        if library.OPENSSL_init_crypto(0x80, None) != 1:  # OPENSSL_INIT_NO_LOAD_CONFIG
+            raise ValueError('OpenSSL 离线初始化失败')
+        if library.OSSL_PROVIDER_set_default_search_path(None, os.fsencode(sys._MEIPASS)) != 1:
+            raise ValueError('OpenSSL 本地算法路径设置失败')
+    # These providers are resolved by the bundled OpenSSL.
     if not library.OSSL_PROVIDER_load(None, b'default'):
         raise ValueError('OpenSSL 默认算法提供程序不可用')
     return library

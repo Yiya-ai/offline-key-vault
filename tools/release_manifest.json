@@ -63,6 +63,7 @@
     "requirements.txt",
     "run_tests.py",
     "security_best_practices_report.md",
+    "tests/conftest.py",
     "tests/test_compatibility.py",
     "tests/test_core.py",
     "tests/test_desktop_improvements.py",

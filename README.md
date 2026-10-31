@@ -12,8 +12,8 @@ The application has no upload, telemetry, online update or automatic dependency-
 | --- | --- |
 | Windows x64 | Locally tested with CPython 3.12 and Tk; intended for Windows 10/11 x64. Clean installations of every target OS have not been tested. |
 | Windows portable package | Built and tested locally after extraction. The public standard profile excludes PyKCS11 and retains bundled license notices. |
-| macOS | Experimental build scripts for Apple Silicon and Intel; no package verified on a real Mac. Use synthetic data only. |
-| Hardware tokens | Generic PKCS#11 interface retained; standard Windows binaries omit PyKCS11. Offline source setup is required; no physical-device validation. |
+| macOS 15+ | Separate Apple Silicon and Intel DMGs; native CI gates installation and self-tests before release. Ad-hoc signed, not Developer ID signed or notarized. |
+| Hardware tokens | Generic PKCS#11 interface retained; standard Windows and macOS binaries omit PyKCS11. Offline source setup is required; no physical-device validation. |
 | Security assurance | Local tests and source review, not an independent security audit or a guarantee against all vulnerabilities. |
 
 ## Features
@@ -56,7 +56,7 @@ Not every algorithm is valid in every format. Unknown algorithms, DSA, RSA-1024 
 
 If you have a trusted, locally built `dist/offline-key-vault-windows-x64.zip`, extract the entire archive into a normal local directory and launch `OfflineKeyVault.exe` or `launch.cmd`. The destination computer does not need Python, pip or administrator privileges. The launcher uses the Windows .NET Framework 4.x runtime.
 
-Do not launch from inside the ZIP or store the application, vault or exports in a network share, linked directory or cloud-synced folder. No download URL or public binary release is implied by this documentation.
+Do not launch from inside the ZIP or store the application, vault or exports in a network share, linked directory or cloud-synced folder. Download verified assets from [GitHub Releases](https://github.com/Yiya-ai/offline-key-vault/releases).
 
 - `self-test.cmd`: run offline checks using temporary synthetic keys.
 - `verify.cmd`: verify package hashes. Hashes detect changes; they do not authenticate a publisher.
@@ -83,7 +83,7 @@ python -I -S build_portable.py
 
 The builder copies allowlisted application files, the local Python/Tk runtime, selected dependencies and license notices. It does not download or upload anything. It tests the actual extracted package in a relocated path, checks runtime isolation and rejects corrupted or incomplete packages before writing the final ZIP to `dist/`.
 
-For experimental macOS builds, consult [MACOS.md](MACOS.md) (Chinese). Windows binaries do not run on macOS, and the Mac path does not yet offer the same storage safeguards.
+For macOS 15+, download the matching arm64 or x86_64 DMG, open it and drag the app into Applications. No separate Python installation is needed. These builds are **not notarized**; see [MACOS.md](MACOS.md) for first-launch approval, native build checks and platform-specific security limits.
 
 ## Desktop installer and interaction improvements
 
@@ -97,7 +97,7 @@ The public standard package does **not** bundle PyKCS11. For hardware tokens, pr
 
 Settings now provide separate vault, key-import and key-export directories. Path inputs refresh local directory listings after a short typing delay; no Go click is required. Saving a dialog always resolves the latest typed path. Password/PIN fields start masked and use an inline eye icon; moving focus outside the field and its eye control masks the value again. Mouse wheels scroll the control under the pointer or its surrounding form.
 
-Primary actions use red, secondary buttons have subtle rounded surfaces, and destructive actions use a soft-red treatment. Input fields, focus indicators and scrollbars share the same styling, including the installer. Forms wrap descriptions and long names to the available width. Window resizing scales text, controls, icons and spacing by a uniform ratio; the client area retains its initial aspect ratio with no letterboxing. Resize from one of the four corners; side-only resizing and maximizing are disabled. The zoom floor is 80%; the dashboard uses 12 pt body/navigation text and a 10 pt minimum, while dense tool dialogs retain an 8 pt minimum. Sidebar footer information and detail actions use the available window height. Two-column tools stack in narrow windows; action buttons remain outside the scrolling form. Scrollbars appear only when content overflows; keyboard focus brings off-screen fields into view. Default paths use inline browse controls, and the hardware-token dialog groups connection, public-key and generation controls. Layout regression checks cover 100%, 150% and 200% Tk font scaling; native macOS rendering remains unverified.
+Primary actions use red, secondary buttons have subtle rounded surfaces, and destructive actions use a soft-red treatment. Input fields, focus indicators and scrollbars share the same styling, including the installer. Forms wrap descriptions and long names to the available width. Window resizing scales text, controls, icons and spacing by a uniform ratio; the client area retains its initial aspect ratio with no letterboxing. Resize from one of the four corners; side-only resizing and maximizing are disabled. The zoom floor is 80%; the dashboard uses 12 pt body/navigation text and a 10 pt minimum, while dense tool dialogs retain an 8 pt minimum. Sidebar footer information and detail actions use the available window height. Two-column tools stack in narrow windows; action buttons remain outside the scrolling form. Scrollbars appear only when content overflows; keyboard focus brings off-screen fields into view. Default paths use inline browse controls, and the hardware-token dialog groups connection, public-key and generation controls. Layout regression checks cover 100%, 150% and 200% Tk font scaling; native Mac CI covers Tk interaction; manual Retina, touchpad and all-display-scale acceptance remains outstanding.
 
 The locked-screen **Key text to file** tool accepts public or private keys. Standard private-key output is encrypted by default; raw/plaintext output requires explicit consent. `Original` preserves the validated input bytes and their existing encryption state; it does not add a new passphrase.
 
@@ -137,7 +137,7 @@ Saving security settings upgrades an OKV1 vault to OKV2; older application versi
 
 - Vault records use AES-256-GCM, random salts/nonces and scrypt with fixed parameters. Encrypted PKCS#8 export uses PBKDF2-HMAC-SHA256 with 600,000 iterations and AES-256-CBC; that export format does not provide the vault's GCM authentication.
 - Imports are limited to 128 KiB, vaults to 16 MiB / 1,000 records, and KDF work/memory parameters are bounded before expensive processing.
-- Windows creates sensitive files with a protected current-user DACL and checks local volumes, links and path components. Targets without persistent ACL support are refused. Mac protection is incomplete and remains experimental.
+- Windows creates sensitive files with a protected current-user DACL and checks local volumes, links and path components. Targets without persistent ACL support are refused. macOS checks local volumes and removes inherited ACLs before writing sensitive files with mode 0600. POSIX path-race limits and remaining manual checks are documented in MACOS.md.
 - The application does not log private keys, passphrases or PINs or automatically copy them to the clipboard. Python/Tcl/OpenSSL memory copies, a compromised OS, administrators and other processes are outside complete application control.
 - The optional path preferences store only the selected vault, import and export directories in `.offline-key-vault-preferences.json`, with current-user file protection. Paths and export filenames can disclose personal or business information even when key contents are encrypted. Clear any directory field in Settings to restore its default. Old export-only settings are read automatically.
 - No application upload or telemetry feature exists. Python audit hooks block covered network/process calls, but do not sandbox native code or stop a separate cloud-sync client. Strict offline operation requires a disconnected device or independently enforced OS isolation.

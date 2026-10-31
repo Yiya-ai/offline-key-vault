@@ -10,6 +10,7 @@ import sys
 import sysconfig
 import tempfile
 import plistlib
+import re
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -23,6 +24,36 @@ def command(arguments, *, cwd, env):
     if result.returncode:
         raise RuntimeError('Local build/check failed:\n' + result.stdout[-12000:] + result.stderr[-12000:])
     return result.stdout
+
+
+def audit_app(app, env):
+    """Refuse private material, optional GPL modules and external native dependencies."""
+    forbidden = {'.okv', '.okvr', '.key', '.pfx', '.p12', '.ppk', '.jks', '.log', '.sqlite'}
+    private_key = re.compile(rb'-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----\s+[A-Za-z0-9+/=]{32,}')
+    checked_files = 0
+    for path in app.rglob('*'):
+        if path.is_symlink():
+            if not path.resolve().is_relative_to(app.resolve()):
+                raise RuntimeError('Bundle contains an external symlink: ' + path.name)
+            continue
+        if not path.is_file(): continue
+        relative = path.relative_to(app).as_posix()
+        if ('pykcs11' in relative.lower() or '/SelfTest/' in relative
+                or path.suffix.lower() in forbidden or path.name in ('direct_url.json', 'preferences.json')
+                or path.name.startswith('.env')):
+            raise RuntimeError('Disallowed bundle member: ' + relative)
+        data = path.read_bytes()
+        if private_key.search(data):
+            raise RuntimeError('Private-key fixture found in bundle: ' + relative)
+        if data[:4] in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xca\xfe\xba\xbe'):
+            dependencies = command(['/usr/bin/otool', '-L', path], cwd=app.parent, env=env)
+            for line in dependencies.splitlines()[1:]:
+                dependency = line.strip().split(' (', 1)[0]
+                if dependency.startswith('/') and not dependency.startswith(('/usr/lib/', '/System/Library/')):
+                    raise RuntimeError('External native dependency in ' + relative)
+        checked_files += 1
+    return {'files_checked': checked_files, 'private_key_scan': True, 'native_dependencies_checked': True,
+            'pykcs11_excluded': True}
 
 
 def main():
@@ -67,8 +98,8 @@ def main():
         env.pop(name, None)
     env['PYTHONNOUSERSITE'] = '1'
     env['PYINSTALLER_CONFIG_DIR'] = str(work / 'cache')
-    probe = "import sys; sys.path.append(sys.argv[1]); import tkinter,cryptography,bcrypt,asn1crypto,cffi,pycparser; w=tkinter.Tk(); w.withdraw(); w.update(); w.destroy()"
-    command([sys.executable, '-I', '-S', '-c', probe, site], cwd=work, env=env)
+    probe = "import sys,json; sys.path.append(sys.argv[1]); import tkinter,cryptography,bcrypt,asn1crypto,cffi,pycparser; w=tkinter.Tk(); w.withdraw(); w.update(); print(json.dumps({'tcl':w.tk.eval('info library'),'tk':w.tk.eval('set tk_library')})); w.destroy()"
+    tk_paths = json.loads(command([sys.executable, '-I', '-S', '-c', probe, site], cwd=work, env=env).strip())
     driver = 'import sys; sys.path.insert(0,sys.argv.pop(1)); sys.path.append(sys.argv.pop(1)); from PyInstaller.__main__ import run; run()'
     arguments = [sys.executable, '-I', '-S', '-c', driver, stage / 'vendor', site, '--noconfirm', '--clean', '--windowed',
                  '--onedir', '--name', 'OfflineKeyVault', '--osx-bundle-identifier', 'local.offlinekeyvault',
@@ -84,6 +115,9 @@ def main():
     crypto = next((p for p in candidates if p.is_file()), None)
     if crypto is None: raise SystemExit('A local OpenSSL 3 shared library is required; no downloads attempted.')
     arguments.extend(['--add-binary', str(crypto) + ':.'])
+    legacy = crypto.parent / 'ossl-modules/legacy.dylib'
+    if not legacy.is_file(): raise RuntimeError('Missing local OpenSSL legacy provider')
+    arguments.extend(['--add-binary', str(legacy) + ':.'])
     arguments.append(stage / 'launch.py')
     print('Building from local dependencies for ' + architecture + '...', flush=True)
     command(arguments, cwd=stage, env=env)
@@ -102,7 +136,13 @@ def main():
                           Path(sys.base_prefix) / 'lib/python3.12/LICENSE.txt') if p.is_file()), None)
     if python_license is None: raise RuntimeError('Missing bundled Python license')
     copy_file(python_license, resources / 'licenses/Python-LICENSE.txt')
-    copy_file(ROOT / 'packaging/licenses/Tcl-LICENSE.txt', resources / 'licenses/Tcl-LICENSE.txt')
+    for component, directory in tk_paths.items():
+        script_dir = Path(directory).resolve()
+        notice = next((p for folder in (script_dir, script_dir.parent, script_dir.parent.parent)
+                       for name in ('license.terms', 'license', 'LICENSE', 'LICENSE.txt')
+                       if (p := folder / name).is_file()), None)
+        if notice is None: raise RuntimeError('Missing local ' + component + ' license')
+        copy_file(notice, resources / 'licenses' / (component + '-LICENSE.txt'))
     # The native OpenSSL bridge is collected independently from cryptography.
     openssl_license = crypto.parent.parent / 'LICENSE.txt'
     if not openssl_license.is_file(): openssl_license = crypto.parent.parent / 'LICENSE'
@@ -112,6 +152,7 @@ def main():
     with info_path.open('rb') as stream: info = plistlib.load(stream)
     info.update(LSMinimumSystemVersion='15.0', CFBundleShortVersionString='0.2.1', CFBundleVersion='0.2.1')
     with info_path.open('wb') as stream: plistlib.dump(info, stream)
+    audit = audit_app(app, env)
     # Ad-hoc signing is entirely local; it is not Developer ID signing/notarization.
     command(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', '--timestamp=none', app], cwd=work, env=env)
     command(['/usr/bin/codesign', '--verify', '--deep', '--strict', app], cwd=work, env=env)
@@ -171,7 +212,7 @@ def main():
     target.with_suffix('.dmg.sha256').write_text(digest(target) + '  ' + target.name + '\n', encoding='ascii')
     report = {'architecture': architecture, 'self_test': reports[-1], 'dmg_install_tested': True,
               'codesign_verified': True, 'notarized': False, 'minimum_macos': '15.0',
-              'profile': 'standard', 'sha256': digest(target), 'files': []}
+              'profile': 'standard', 'sha256': digest(target), 'audit': audit, 'files': []}
     for path in sorted(app.rglob('*')):
         if path.is_file() and not path.is_symlink():
             report['files'].append({'path': path.relative_to(app).as_posix(), 'sha256': digest(path)})

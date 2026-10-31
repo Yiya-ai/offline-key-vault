@@ -29,6 +29,6 @@ PyKCS11 1.5.18 的[官方说明](https://github.com/LudovicRousseau/PyKCS11/blob
 
 公开 Windows 标准构建不捆绑 PyKCS11，安装器构建会检查 standard profile 及文件清单，拒绝包含 PyKCS11 的载荷。硬件令牌接口保留，但使用者须通过可信离线依赖构建自己的本地令牌版本。`--with-pkcs11` 生成单独命名的本地产物，不作为标准安装器的输入。
 
-本地完整版本或实验性 Mac 构建可能包含 PyKCS11；对外分发前仍需完成组合分发许可核对，并按适用 GPL 版本提供完整对应源码及构建材料。当前流程没有生成这些材料，不应将本地完整版本直接公开。标准安装包包含其他不同许可的组件，不能称为“全包 MIT”；原创源码继续采用 MIT。包内保留 Python 的完整 Windows 二进制附加条款、Tcl/Tk 许可，以及各依赖 dist-info 中的许可和版权声明。
+Windows 和 macOS 公开标准包均不包含 PyKCS11。本地完整版本可能包含 PyKCS11；对外分发前仍需完成组合分发许可核对，并按适用 GPL 版本提供完整对应源码及构建材料。当前流程没有生成这些材料，不应将本地完整版本直接公开。标准安装包包含其他不同许可的组件，不能称为“全包 MIT”；原创源码继续采用 MIT。包内保留 Python 的完整 Windows 二进制附加条款、Tcl/Tk 许可，以及各依赖 dist-info 中的许可和版权声明。
 
 Tcl 8.6.15 的完整声明保存在 `packaging/licenses/Tcl-LICENSE.txt`，构建后位于 `licenses/Tcl-LICENSE.txt`。来源：https://raw.githubusercontent.com/tcltk/tcl/core-8-6-15/license.terms 。SHA-256：`c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16`。离线 vendor 缺少 RECORD 时，构建器仍按真实 dist-info 目录保留 LICENSE/COPYING/NOTICE；缺失许可时停止构建，不复制 direct_url.json 等本机安装来源元数据。
