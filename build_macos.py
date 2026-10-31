@@ -100,7 +100,8 @@ def main():
         copy_distribution_metadata(dist, resources / 'licenses' / name)
     python_license = next((p for p in (Path(sys.base_prefix) / 'LICENSE.txt',
                           Path(sys.base_prefix) / 'lib/python3.12/LICENSE.txt') if p.is_file()), None)
-    if python_license is not None: copy_file(python_license, resources / 'licenses/Python-LICENSE.txt')
+    if python_license is None: raise RuntimeError('Missing bundled Python license')
+    copy_file(python_license, resources / 'licenses/Python-LICENSE.txt')
     copy_file(ROOT / 'packaging/licenses/Tcl-LICENSE.txt', resources / 'licenses/Tcl-LICENSE.txt')
     # The native OpenSSL bridge is collected independently from cryptography.
     openssl_license = crypto.parent.parent / 'LICENSE.txt'
@@ -164,7 +165,7 @@ def main():
     destination.mkdir(exist_ok=True)
     checked(destination)
     target = destination / dmg.name
-    if target.is_symlink() or target.with_suffix('.zip.sha256').is_symlink():
+    if target.is_symlink() or target.with_suffix('.dmg.sha256').is_symlink():
         raise RuntimeError('Output cannot be a symbolic link')
     os.replace(dmg, target)
     target.with_suffix('.dmg.sha256').write_text(digest(target) + '  ' + target.name + '\n', encoding='ascii')
