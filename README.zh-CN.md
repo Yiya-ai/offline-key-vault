@@ -56,7 +56,7 @@
 
 如果已有可信的本地构建包 `dist/offline-key-vault-windows-x64.zip`，完整解压到普通本地目录，然后双击 `OfflineKeyVault.exe` 或 `launch.cmd`。目标电脑无需安装 Python、pip 或取得管理员权限。启动器使用 Windows .NET Framework 4.x。
 
-不要在 ZIP 内启动，也不要把应用、密钥库或导出文件放在网络共享、链接目录或云同步目录。这份文档不代表已提供公开下载地址或已发布二进制版本。
+不要在 ZIP 内启动，也不要把应用、密钥库或导出文件放在网络共享、链接目录或云同步目录。已验证的安装文件见 [GitHub Releases](https://github.com/Yiya-ai/offline-key-vault/releases)。
 
 - `self-test.cmd`：使用临时合成密钥执行离线自检。
 - `verify.cmd`：检查包内摘要。摘要可检测变化，不能认证发布者身份。
@@ -164,10 +164,10 @@ python -I -S tools/release.py source
 3. 在本地 Git 仓库运行 `python -I -S tools/release.py stage`，再运行 `python -I -S tools/release.py audit --index` 和 `git diff --cached --check`，人工复核暂存内容及已有历史。
 4. commit/push 或上传前确认精确目标及明确发布授权。工具不会提交、配置远程或上传。
 
-CI 只检查源码隐私模式、暂存索引白名单及 Python 语法，不运行完整密码学/GUI 测试、不发布附件。模式扫描不能证明不存在所有类型的秘密。具体发布流程见 [RELEASING.md](RELEASING.md)。
+推送和 PR 的基础 CI 检查源码隐私模式、暂存索引白名单及 Python 语法。单独手动启动的 macOS 工作流还在两个原生架构上构建 DMG、运行密码学/GUI 回归及实际安装自检，通过后生成待审核附件；公开 Release 另行发布。模式扫描不能证明不存在所有类型的秘密。具体发布流程见 [RELEASING.md](RELEASING.md)。
 
 ## 贡献与许可证
 
 参见中英文[贡献指南](CONTRIBUTING.md)。原创源码和文档采用 [MIT](LICENSE)，依赖保留各自许可证。
 
-**PyKCS11 1.5.18 使用 GPL-2.0-or-later。** 当前便携构建包含该依赖，对外分发二进制前需完成组合分发要求核对并提供适用的完整对应源码及声明，仅附 wheel 或上游链接不能完成这些要求。不能将整个便携包标记为 MIT 或已完成许可发布审查。参见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+**可选 PyKCS11 1.5.18 使用 GPL-2.0-or-later。Windows 和 macOS 公开标准包均不捆绑该依赖。** 自行加入该依赖的本地令牌版本，对外分发前需完成组合分发要求核对并提供适用的完整对应源码及声明，仅附 wheel 或上游链接不能完成这些要求。标准包保留各组件许可证，不能将整个包笼统标记为 MIT。参见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

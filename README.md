@@ -164,10 +164,10 @@ Before a release:
 3. In a local Git repository, use `python -I -S tools/release.py stage`, then `python -I -S tools/release.py audit --index` and `git diff --cached --check`. Review staged content and any existing history manually.
 4. Confirm the exact destination and explicit publication authorization before any commit/push or upload. The tools do not commit, configure a remote or upload.
 
-CI checks source privacy patterns, the index allowlist and Python syntax only; it does not run the full cryptography/GUI suite or publish artifacts. Pattern checks are not a proof that every possible secret is absent. Further release details are in [RELEASING.md](RELEASING.md) (Chinese).
+The push/PR workflow checks source privacy patterns, the index allowlist and Python syntax. A separate manually dispatched macOS workflow builds both native DMGs, runs cryptography/GUI regressions and installation self-tests, then produces artifacts for review. Public Releases are published separately. Pattern checks are not proof that every possible secret is absent. Further release details are in [RELEASING.md](RELEASING.md) (Chinese).
 
 ## Contributing and license
 
 See the bilingual [contribution guide](CONTRIBUTING.md). Original project source and documentation are licensed under [MIT](LICENSE). Dependencies retain their own licenses.
 
-**PyKCS11 1.5.18 is GPL-2.0-or-later.** The current portable build includes it. Public binary distribution requires resolving the combined-distribution requirements and providing the applicable complete corresponding source and notices. This process is not completed by including a wheel or an upstream link. Do not describe the entire portable bundle as MIT or license-cleared. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (Chinese).
+**Optional PyKCS11 1.5.18 is GPL-2.0-or-later. Neither the Windows nor macOS public standard package bundles it.** A local token build that adds this dependency requires resolving combined-distribution obligations and providing the applicable complete corresponding source and notices before redistribution. A wheel or upstream link alone does not fulfill those obligations. Standard packages retain component-specific licenses; do not describe the entire bundle as MIT. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (Chinese).
