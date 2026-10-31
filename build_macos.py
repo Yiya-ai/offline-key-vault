@@ -144,8 +144,8 @@ def main():
                        for name in ('license.terms', 'license', 'LICENSE', 'LICENSE.txt')
                        if (p := folder / name).is_file()), None)
         # The python.org 3.12.10 framework omits standalone Tcl/Tk notices.
-        # These exact upstream 8.6.15 notices are retained in the source release.
-        if notice is None and tk_paths[component + '_version'] == '8.6.15':
+        # Official 8.6.15 and 8.6.16 license.terms were compared byte-for-byte.
+        if notice is None and tk_paths[component + '_version'] in ('8.6.15', '8.6.16'):
             notice = ROOT / 'packaging/licenses' / (component.capitalize() + '-LICENSE.txt')
         if notice is None: raise RuntimeError('Missing local ' + component + ' license for ' + tk_paths[component + '_version'])
         copy_file(notice, resources / 'licenses' / (component + '-LICENSE.txt'))
