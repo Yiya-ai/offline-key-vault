@@ -133,10 +133,14 @@ internal static class Installer {
             lt.InvokeMember("TargetPath",BindingFlags.SetProperty,null,link,new object[]{Path.Combine(installed,"OfflineKeyVault.exe")});
             lt.InvokeMember("WorkingDirectory",BindingFlags.SetProperty,null,link,new object[]{installed});
             lt.InvokeMember("Description",BindingFlags.SetProperty,null,link,new object[]{"Offline Key Vault"});
+            string iconLocation=Path.Combine(installed,"OfflineKeyVault.exe")+",0";
+            lt.InvokeMember("IconLocation",BindingFlags.SetProperty,null,link,new object[]{iconLocation});
             lt.InvokeMember("Save",BindingFlags.InvokeMethod,null,link,null);
             if (!File.Exists(path)) throw new IOException("快捷方式未创建。");
             object target=lt.InvokeMember("TargetPath",BindingFlags.GetProperty,null,link,null);
             if (!String.Equals((string)target,Path.Combine(installed,"OfflineKeyVault.exe"),StringComparison.OrdinalIgnoreCase)) throw new IOException("快捷方式目标校验失败。");
+            object icon=lt.InvokeMember("IconLocation",BindingFlags.GetProperty,null,link,null);
+            if (!String.Equals((string)icon,iconLocation,StringComparison.OrdinalIgnoreCase)) throw new IOException("快捷方式图标校验失败。");
         } finally {
             if(link!=null) Marshal.FinalReleaseComObject(link);
             if(shell!=null) Marshal.FinalReleaseComObject(shell);
@@ -196,6 +200,7 @@ internal static class Installer {
     }
     static string ChooseFolder(Form owner) {
         var picker=new Form {Text="选择本地父目录",ClientSize=new Size(680,560),MinimumSize=new Size(600,460),StartPosition=FormStartPosition.CenterParent,Font=owner.Font,AutoScaleDimensions=new SizeF(96,96),AutoScaleMode=AutoScaleMode.Dpi};
+        picker.Icon=owner.Icon;
         var path=new TextBox {Left=20,Top=20,Width=480,Text=Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)};
         var up=new Button {Text="上级",Left=510,Top=18,Width=90};
         var drives=new ComboBox {Left=20,Top=56,Width=580,DropDownStyle=ComboBoxStyle.DropDownList};
@@ -251,6 +256,7 @@ internal static class Installer {
         if(args.Length!=0)return 2;
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
         var form=new Form {Text="离线密钥柜 · 安装",ClientSize=new Size(650,400),StartPosition=FormStartPosition.CenterScreen,FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false,Font=new Font("Microsoft YaHei UI",10)};
+        form.Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         var title=new Label {Text="安装离线密钥柜",Left=26,Top=24,Width=590,Height=40,Font=new Font("Microsoft YaHei UI",20,FontStyle.Bold)};
         var intro=new Label {Text="完整离线安装 · 无需管理员权限 · 不改动已有密钥库",Left=28,Top=76,Width=590,Height=28};
         var label=new Label {Text="安装位置（输入新的本地文件夹路径）",Left=28,Top=119,Width=590,Height=28};

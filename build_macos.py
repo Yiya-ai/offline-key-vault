@@ -79,7 +79,7 @@ def main():
     for name, version in required.items():
         if name not in installed or installed[name].version != version:
             raise SystemExit('Missing local dependency: ' + name + '==' + version + '; no downloads attempted.')
-    for binary in ('/usr/bin/ditto', '/usr/bin/codesign', '/usr/bin/hdiutil'):
+    for binary in ('/usr/bin/ditto', '/usr/bin/codesign', '/usr/bin/hdiutil', '/usr/bin/iconutil'):
         if not Path(binary).is_file():
             raise SystemExit('Missing local macOS tool: ' + binary)
     (ROOT / 'build').mkdir(exist_ok=True)
@@ -98,11 +98,21 @@ def main():
         env.pop(name, None)
     env['PYTHONNOUSERSITE'] = '1'
     env['PYINSTALLER_CONFIG_DIR'] = str(work / 'cache')
+    from keyvault.branding import png
+    iconset = work / 'OfflineKeyVault.iconset'
+    iconset.mkdir()
+    for size in (16, 32, 128, 256, 512):
+        for scale in (1, 2):
+            suffix = '@2x' if scale == 2 else ''
+            (iconset / f'icon_{size}x{size}{suffix}.png').write_bytes(png(size * scale))
+    icon = work / 'OfflineKeyVault.icns'
+    command(['/usr/bin/iconutil', '-c', 'icns', '-o', icon, iconset], cwd=work, env=env)
     probe = "import sys,json; sys.path.append(sys.argv[1]); import tkinter,cryptography,bcrypt,asn1crypto,cffi,pycparser; w=tkinter.Tk(); w.withdraw(); w.update(); print(json.dumps({'tcl':w.tk.eval('info library'),'tk':w.tk.eval('set tk_library'),'tcl_version':w.tk.eval('info patchlevel'),'tk_version':w.tk.eval('package require Tk')})); w.destroy()"
     tk_paths = json.loads(command([sys.executable, '-I', '-S', '-c', probe, site], cwd=work, env=env).strip())
     driver = 'import sys; sys.path.insert(0,sys.argv.pop(1)); sys.path.append(sys.argv.pop(1)); from PyInstaller.__main__ import run; run()'
     arguments = [sys.executable, '-I', '-S', '-c', driver, stage / 'vendor', site, '--noconfirm', '--clean', '--windowed',
                  '--onedir', '--name', 'OfflineKeyVault', '--osx-bundle-identifier', 'local.offlinekeyvault',
+                 '--icon', icon,
                  '--target-architecture', architecture, '--distpath', work / 'dist',
                  '--workpath', work / 'analysis', '--specpath', work,
                  '--runtime-hook', stage / 'macos_runtime_hook.py', '--paths', stage, '--paths', stage / 'vendor',
@@ -160,9 +170,14 @@ def main():
     copy_file(openssl_license, resources / 'licenses/OpenSSL-LICENSE.txt')
     info_path = app / 'Contents/Info.plist'
     with info_path.open('rb') as stream: info = plistlib.load(stream)
-    info.update(LSMinimumSystemVersion='15.0', CFBundleShortVersionString='0.2.1', CFBundleVersion='0.2.1')
+    info.update(LSMinimumSystemVersion='15.0', CFBundleShortVersionString='0.2.2', CFBundleVersion='0.2.2')
+    bundled_icon = resources / info.get('CFBundleIconFile', '')
+    if not bundled_icon.is_file() or bundled_icon.read_bytes() != icon.read_bytes():
+        raise RuntimeError('Application bundle icon is missing or incorrect')
+    command(['/usr/bin/iconutil', '-c', 'iconset', '-o', work / 'verified.iconset', bundled_icon], cwd=work, env=env)
     with info_path.open('wb') as stream: plistlib.dump(info, stream)
     audit = audit_app(app, env)
+    audit['application_icon_verified'] = True
     # Ad-hoc signing is entirely local; it is not Developer ID signing/notarization.
     command(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', '--timestamp=none', app], cwd=work, env=env)
     command(['/usr/bin/codesign', '--verify', '--deep', '--strict', app], cwd=work, env=env)

@@ -23,7 +23,7 @@ PACKAGES = {'cryptography': '46.0.7', 'asn1crypto': '1.5.1', 'bcrypt': '5.0.0',
 MODULES = {name: name for name in PACKAGES}
 MODULES.update({'pycryptodomex': 'Cryptodome', 'pyjks': 'jks', 'argon2-cffi': 'argon2', 'argon2-cffi-bindings': '_argon2_cffi_bindings', 'pykcs11': 'PyKCS11', 'javaobj-py3': 'javaobj', 'pyasn1-modules': 'pyasn1_modules'})
 APP_FILES = ('launch.py', 'keyvault/__init__.py', 'keyvault/app.py', 'keyvault/offline.py',
-             'keyvault/macos_storage.py',
+             'keyvault/macos_storage.py', 'keyvault/branding.py',
              'keyvault/safeio.py', 'keyvault/vault.py', 'keyvault/keys.py', 'keyvault/jwk.py',
              'keyvault/pbes2.py', 'keyvault/import_guard.py', 'keyvault/localdialog.py',
              'keyvault/diagnostics.py', 'keyvault/compat_import.py', 'keyvault/material.py', 'keyvault/native_crypto.py', 'keyvault/openpgp.py', 'keyvault/ppk.py', 'keyvault/token.py', 'keyvault/token_ui.py', 'keyvault/protection.py', 'keyvault/security_ui.py', 'keyvault/preferences.py', 'keyvault/paircheck.py', 'keyvault/tool_ui.py', 'keyvault/widgets.py', 'keyvault/window_resize.py', 'keyvault/conversion.py', 'keyvault/content_ui.py')
@@ -62,6 +62,25 @@ def copy_tree(source, dest, predicate=lambda p: True, skip=frozenset()):
 def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def verify_executable_icon(path):
+    """Ask Windows to extract the embedded icon, without Explorer's fallback."""
+    import ctypes
+    from ctypes import wintypes
+    extract = ctypes.WinDLL('shell32', use_last_error=True).ExtractIconExW
+    extract.argtypes = (wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.HANDLE),
+                        ctypes.POINTER(wintypes.HANDLE), wintypes.UINT)
+    extract.restype = wintypes.UINT
+    destroy = ctypes.WinDLL('user32', use_last_error=True).DestroyIcon
+    destroy.argtypes = (wintypes.HANDLE,)
+    large, small = wintypes.HANDLE(), wintypes.HANDLE()
+    try:
+        if extract(str(path), 0, ctypes.byref(large), ctypes.byref(small), 1) in (0, 0xffffffff) or not large or not small:
+            raise RuntimeError('Executable is missing its application icon')
+    finally:
+        if large: destroy(large)
+        if small: destroy(small)
 
 
 def copy_distribution_metadata(dist, destination):
@@ -197,8 +216,12 @@ def main():
     if template.count('__MANIFEST_SHA256__') != 1:
         raise RuntimeError('Launcher manifest binding template is invalid')
     launcher_source.write_text(template.replace('__MANIFEST_SHA256__', digest(manifest)), encoding='utf-8')
-    run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
+    from keyvault.branding import write_ico
+    icon = work / 'OfflineKeyVault.ico'
+    write_ico(icon)
+    run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/win32icon:' + str(icon),
                  '/r:System.Windows.Forms.dll', '/out:' + str(launcher), launcher_source])
+    verify_executable_icon(launcher)
     temporary_zip = work / ('offline-key-vault-windows-x64-local-pkcs11.zip' if options.with_pkcs11 else 'offline-key-vault-windows-x64.zip')
     with zipfile.ZipFile(temporary_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path in sorted(p for p in bundle.rglob('*') if p.is_file()):

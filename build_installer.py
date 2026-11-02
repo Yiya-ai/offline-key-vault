@@ -9,7 +9,7 @@ import tempfile
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import zipfile
-from build_portable import checked, digest, run_checked
+from build_portable import checked, digest, run_checked, verify_executable_icon
 
 ROOT = Path(__file__).resolve().parent
 
@@ -35,12 +35,17 @@ def main():
     output = work / 'offline-key-vault-setup.exe'
     compiler = checked(Path(os.environ['SystemRoot']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe')
     print('Compiling offline installer...', flush=True)
-    run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
+    from keyvault.branding import write_ico
+    icon = work / 'OfflineKeyVault.ico'
+    write_ico(icon)
+    run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/win32icon:' + str(icon),
                  '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
                  '/resource:' + str(archive) + ',payload.zip', '/out:' + str(output), ROOT / 'packaging/Installer.cs'])
+    verify_executable_icon(output)
     installed = work / '安装 验证'
     print('Testing actual install, shortcut target, runtime and overwrite refusal...', flush=True)
     run_checked([output, '--test-install', installed], cwd=work)
+    verify_executable_icon(installed / 'OfflineKeyVault.exe')
     if not (work / 'shortcut-test/OfflineKeyVault-Test.lnk').is_file():
         raise RuntimeError('Shortcut verification failed')
     target = ROOT / 'dist' / output.name
@@ -50,6 +55,7 @@ def main():
     if sidecar.exists(): checked(sidecar)
     sidecar.write_text(digest(target) + '  ' + target.name + '\n', encoding='ascii')
     report = {'ok': True, 'install_verified': True, 'shortcut_target_verified': True,
+              'embedded_icons_verified': True, 'shortcut_icon_verified': True,
               'overwrite_rejected': True, 'real_desktop_untouched': True, 'sha256': digest(target)}
     (work / 'verification.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(json.dumps(report), flush=True)

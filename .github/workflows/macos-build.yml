@@ -42,7 +42,7 @@ jobs:
         timeout-minutes: 12
         run: |
           mkdir -p test-results
-          python -m pytest -v -o faulthandler_timeout=90 tests/test_macos.py tests/test_core.py tests/test_protection.py tests/test_public_text.py tests/test_export_paircheck.py tests/test_desktop_improvements.py tests/test_compatibility.py --basetemp=test-results/macos-ci
+          python -m pytest -v -o faulthandler_timeout=90 tests/test_branding.py tests/test_macos.py tests/test_core.py tests/test_protection.py tests/test_public_text.py tests/test_export_paircheck.py tests/test_desktop_improvements.py tests/test_compatibility.py --basetemp=test-results/macos-ci
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: macos-standard-${{ matrix.architecture }}

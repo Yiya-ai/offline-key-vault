@@ -30,6 +30,8 @@ LATIN_FONT = 'Helvetica' if sys.platform == 'darwin' else 'Segoe UI'
 class Application:
     def __init__(self, root, preferences_path=None):
         self.root = root
+        from .branding import install_window_icon
+        install_window_icon(root)
         self.vault = Vault()
         from .preferences import Preferences
         self.preferences = Preferences(preferences_path)

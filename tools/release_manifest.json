@@ -25,6 +25,8 @@
     "build_portable.py",
     "keyvault/__init__.py",
     "keyvault/app.py",
+    "keyvault/branding.py",
+    "tests/test_branding.py",
     "keyvault/compat_import.py",
     "keyvault/content_ui.py",
     "keyvault/conversion.py",

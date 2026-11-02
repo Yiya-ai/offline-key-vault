@@ -8,6 +8,8 @@ The application has no upload, telemetry, online update or automatic dependency-
 
 ## Project status
 
+Application icons are generated locally from the same artwork for Windows executables, shortcuts and windows, and for the macOS app bundle. Older installations need the updated package to receive these icons.
+
 | Component | Status |
 | --- | --- |
 | Windows x64 | Locally tested with CPython 3.12 and Tk; intended for Windows 10/11 x64. Clean installations of every target OS have not been tested. |
