@@ -59,11 +59,20 @@ internal static partial class Installer {
             return handles;
         } catch { foreach(var h in handles) h.Dispose(); throw; }
     }
+    internal static Process StartChecked(Func<Process> launch) {
+        for(int attempt=0;;attempt++) {
+            try {return launch();}
+            catch(System.ComponentModel.Win32Exception error) {
+                if((error.NativeErrorCode!=32&&error.NativeErrorCode!=33)||attempt>=5)throw;
+                System.Threading.Thread.Sleep(100*(1<<attempt));
+            }
+        }
+    }
     static void Verify(string folder, string mode) {
         var info=new ProcessStartInfo(Path.Combine(folder,"OfflineKeyVault.exe"),mode);
         info.UseShellExecute=false; info.CreateNoWindow=true;
         info.WorkingDirectory=folder; info.RedirectStandardOutput=true; info.RedirectStandardError=true;
-        using(var process=Process.Start(info)) {
+        using(var process=StartChecked(()=>Process.Start(info))) {
             process.OutputDataReceived+=(sender,e)=>{}; process.ErrorDataReceived+=(sender,e)=>{};
             process.BeginOutputReadLine(); process.BeginErrorReadLine();
             if (!process.WaitForExit(180000)) { process.Kill(); throw new IOException("安装包自检超时。"); }

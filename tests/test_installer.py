@@ -6,6 +6,35 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(os.name != 'nt', reason='Windows installer')
+
+
+@pytest.mark.parametrize('mode', ['transient', 'persistent', 'nontransient'])
+def test_verified_archive_publication_preserves_old_output_on_failure(tmp_path, monkeypatch, mode):
+    import build_portable
+    source, target = tmp_path / 'new.zip', tmp_path / 'published.zip'
+    source.write_bytes(b'new verified artifact')
+    target.write_bytes(b'previous artifact')
+    replace = os.replace
+    calls = []
+    def locked_replace(first, second):
+        calls.append(1)
+        if mode == 'transient' and len(calls) == 3:
+            return replace(first, second)
+        error = PermissionError('synthetic sharing error')
+        error.winerror = 87 if mode == 'nontransient' else 5
+        raise error
+    monkeypatch.setattr(build_portable.os, 'replace', locked_replace)
+    monkeypatch.setattr(build_portable.time, 'sleep', lambda _: None)
+    if mode == 'transient':
+        build_portable.publish_archive(source, target)
+        assert target.read_bytes() == b'new verified artifact' and not source.exists()
+        assert len(calls) == 3
+    else:
+        with pytest.raises(PermissionError):
+            build_portable.publish_archive(source, target)
+        assert target.read_bytes() == b'previous artifact' and source.read_bytes() == b'new verified artifact'
+        assert len(calls) == (1 if mode == 'nontransient' else 6)
+
 HARNESS = r'''
 using System;
 using System.IO;
@@ -92,6 +121,13 @@ public static class InstallerIOTests {
     }
     public static string Run(string mode,string folder) {
         if(mode=="path-editor"||mode.StartsWith("layout-"))return TestUI(mode,folder);
+        if(mode.StartsWith("process-")) {
+            int attempts=0;bool refused=false;
+            try {Installer.StartChecked(()=>{attempts++;if(mode=="process-sharing"&&attempts==3)return null;throw new System.ComponentModel.Win32Exception(mode=="process-permission"?5:attempts==1?32:33);});}
+            catch(System.ComponentModel.Win32Exception){refused=true;}
+            Check(attempts==(mode=="process-sharing"?3:mode=="process-permission"?1:6),"Unexpected process-start retry count");
+            Check(refused==(mode!="process-sharing"),"Unexpected process-start outcome");return "passed";
+        }
         string path=Path.Combine(folder,"synthetic-runtime.dll");
         if(mode=="existing") {
             File.WriteAllText(path,"preserve existing content");
@@ -149,7 +185,7 @@ def compiled_installer(tmp_path_factory):
     return dll, script
 
 
-@pytest.mark.parametrize('mode', ['normal', 'transient', 'persistent', 'existing', 'path-editor', 'layout-normal', 'layout-large', 'layout-picker'])
+@pytest.mark.parametrize('mode', ['normal', 'transient', 'persistent', 'existing', 'path-editor', 'layout-normal', 'layout-large', 'layout-picker', 'process-sharing', 'process-persistent', 'process-permission'])
 def test_installer_output_creation(compiled_installer, tmp_path, mode):
     dll, script = compiled_installer
     result = subprocess.run(['powershell.exe', '-NoProfile', '-File', str(script), str(dll), mode,

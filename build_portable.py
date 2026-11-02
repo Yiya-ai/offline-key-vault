@@ -65,6 +65,21 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def publish_archive(source, target):
+    """Atomically publish verified output; tolerate temporary Windows file locks."""
+    source, target = Path(source), Path(target)
+    for attempt in range(6):
+        checked(source); checked(target.parent)
+        if target.exists() or target.is_symlink(): checked(target)
+        try:
+            os.replace(source, target)
+            return
+        except OSError as error:
+            if getattr(error, 'winerror', None) not in (5, 32, 33) or attempt == 5 or not source.exists():
+                raise
+            time.sleep(0.1 * (2 ** attempt))
+
+
 def verify_executable_icon(path):
     """Ask Windows to extract the embedded icon, without Explorer's fallback."""
     import ctypes
@@ -307,7 +322,7 @@ def main():
     output = ROOT / 'dist' / temporary_zip.name
     if output.exists():
         checked(output)
-    os.replace(temporary_zip, output)
+    publish_archive(temporary_zip, output)
     checksum = output.with_suffix(output.suffix + '.sha256')
     if checksum.exists():
         checked(checksum)
