@@ -13,7 +13,74 @@ using System.Reflection;
 using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Windows.Forms;
+using System.Drawing;
 public static class InstallerIOTests {
+    static void Check(bool value,string message) {if(!value)throw new Exception(message);}
+    static void CheckBounds(Control parent) {
+        foreach(Control child in parent.Controls) {
+            if(!child.Visible)continue;
+            Check(child.Left>=0&&child.Top>=0&&child.Right<=parent.ClientSize.Width+1&&child.Bottom<=parent.ClientSize.Height+1,"Clipped: "+child.GetType().Name+" "+child.Text);
+            var label=child as Label;
+            if(label!=null)Check(label.Height>=label.PreferredHeight,"Label height clipped: "+label.Text);
+            CheckBounds(child);
+        }
+    }
+    static string TestUI(string mode,string folder) {
+        Application.EnableVisualStyles();
+        if(mode=="path-editor") {
+            using(var model=new TextBox {Text=Path.Combine(Path.GetPathRoot(folder),"Apps","OfflineKeyVault")})
+            using(var editor=new Installer.LocationEditor(model,new Button())) {
+                string root=Path.GetPathRoot(folder);
+                Check((string)editor.Drive.SelectedItem==root,"Initial drive mismatch");
+                Check(editor.Folder.Text==@"Apps\OfflineKeyVault","Initial folder mismatch");
+                editor.Folder.Text=@"Tools\Vault";Check(model.Text==root+@"Tools\Vault","Typing did not update model");
+                foreach(string bad in new[]{@"\escape",@"C:relative",@"\\server\share",@"\\?\C:\device"}) {
+                    editor.Folder.Text=bad;Check(model.Text==String.Empty,"Unsafe path silently rewritten");
+                    try {typeof(Installer).GetMethod("CheckLocal",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{bad,false});throw new Exception("Unsafe absolute path accepted");}
+                    catch(TargetInvocationException error) {Check(error.InnerException is IOException,"Unexpected path failure");}
+                }
+                editor.Folder.Text=root+@"Paste\Vault";
+                Check(editor.Folder.Text==@"Paste\Vault"&&model.Text==root+@"Paste\Vault","Full paste did not split");
+                editor.Folder.Text=model.Text;Check(editor.Folder.Text==@"Paste\Vault","Same path paste did not split");
+                if(editor.Drive.Items.Count>1) {
+                    int next=(editor.Drive.SelectedIndex+1)%editor.Drive.Items.Count;
+                    editor.Drive.SelectedIndex=next;
+                    Check(model.Text==(string)editor.Drive.SelectedItem+@"Paste\Vault","Drive change lost folder");
+                }
+                model.Text=root+@"Browse\Vault";Check(editor.Folder.Text==@"Browse\Vault","Browse did not sync");
+                model.Enabled=false;Check(!editor.Enabled,"Editor stayed enabled during install");
+                string start=(string)typeof(Installer).GetMethod("BrowseStart",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{Path.Combine(folder,"new","install")});
+                Check(start==folder,"New installation browser did not start in existing parent");
+            }
+            return "passed";
+        }
+        using(var owner=new Form())
+        using(var form=(Form)typeof(Installer).GetMethod(mode=="layout-picker"?"CreateFolderPicker":"CreateWizard",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,mode=="layout-picker"?new object[]{owner,folder,new Action<string>(value=>{})}:null)) {
+            if(mode=="layout-large")form.Font=new Font("Microsoft YaHei UI",14);
+            form.Show();Application.DoEvents();form.PerformLayout();Application.DoEvents();
+            CheckBounds(form);
+            Check(form.ClientSize.Height<700,"Excessive empty height");
+            foreach(Control control in form.Controls) {
+                var panel=control as Panel;
+                if(panel!=null)Check(!panel.VerticalScroll.Visible&&!panel.HorizontalScroll.Visible,"Unnecessary scrollbar");
+            }
+            using(var bitmap=new Bitmap(form.Width,form.Height)) {form.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));bitmap.Save(Path.Combine(folder,"installer-layout.png"));}
+            if(mode=="layout-picker") {
+                var field=(TextBox)form.Controls.Find("InstallFolder",true)[0];
+                var choose=(Button)form.Controls.Find("ChooseDirectory",true)[0];
+                Check(choose.Enabled,"Existing folder not selectable");
+                field.Text=@"missing-child\invalid";Application.DoEvents();
+                Check(!choose.Enabled,"Stale folder can still be confirmed");
+                field.Text=folder;
+                var until=DateTime.UtcNow.AddMilliseconds(600);
+                while(DateTime.UtcNow<until){Application.DoEvents();System.Threading.Thread.Sleep(10);}
+                Check(choose.Enabled,"Live directory refresh did not run");
+            }
+            form.Close();
+        }
+        return "passed";
+    }
     static void Restore(string folder,string descriptor) {
         var security=new DirectorySecurity();
         security.SetSecurityDescriptorSddlForm(descriptor,AccessControlSections.Access);
@@ -24,6 +91,7 @@ public static class InstallerIOTests {
         catch(TargetInvocationException error) { throw error.InnerException; }
     }
     public static string Run(string mode,string folder) {
+        if(mode=="path-editor"||mode.StartsWith("layout-"))return TestUI(mode,folder);
         string path=Path.Combine(folder,"synthetic-runtime.dll");
         if(mode=="existing") {
             File.WriteAllText(path,"preserve existing content");
@@ -81,7 +149,7 @@ def compiled_installer(tmp_path_factory):
     return dll, script
 
 
-@pytest.mark.parametrize('mode', ['normal', 'transient', 'persistent', 'existing'])
+@pytest.mark.parametrize('mode', ['normal', 'transient', 'persistent', 'existing', 'path-editor', 'layout-normal', 'layout-large', 'layout-picker'])
 def test_installer_output_creation(compiled_installer, tmp_path, mode):
     dll, script = compiled_installer
     result = subprocess.run(['powershell.exe', '-NoProfile', '-File', str(script), str(dll), mode,

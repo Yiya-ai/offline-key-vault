@@ -21,7 +21,7 @@ internal static partial class Installer {
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "OfflineKeyVault");
     }
     static string CheckLocal(string path, bool allowRoot=false) {
-        if (String.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path) || path.StartsWith(@"\\") || path.StartsWith("//"))
+        if (String.IsNullOrWhiteSpace(path) || path.Length<3 || !Char.IsLetter(path[0]) || path[1]!=':' || (path[2]!='\\'&&path[2]!='/') || path.StartsWith(@"\\") || path.StartsWith("//"))
             throw new IOException("请选择普通本地磁盘的完整路径，不允许网络或设备路径。");
         string full = Path.GetFullPath(path);
         string anchor = Path.GetPathRoot(full);
@@ -208,35 +208,101 @@ internal static partial class Installer {
             } else if(control is TextBox || control is ListBox || control is ComboBox) control.BackColor=Color.FromArgb(250,251,252);
         }
     }
+    // Both windows use the same drive + folder editor. The hidden model keeps
+    // existing validation authoritative; the UI must never substitute a valid
+    // stale path when the user's new input is incomplete or unsafe.
+    internal sealed class LocationEditor : TableLayoutPanel {
+        internal readonly ComboBox Drive=new ComboBox {Name="InstallDrive",AccessibleName="磁盘",DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
+        internal readonly TextBox Folder=new TextBox {Name="InstallFolder",AccessibleName="具体路径",Dock=DockStyle.Fill};
+        readonly TextBox model; bool syncing;
+        internal LocationEditor(TextBox value,Button browse) {
+            model=value;AutoSize=true;ColumnCount=3;RowCount=2;Dock=DockStyle.Top;
+            ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,108));
+            ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            Controls.Add(new Label {Text="磁盘",AutoSize=true,Margin=new Padding(0,0,0,8)},0,0);
+            Controls.Add(new Label {Text="具体路径",AutoSize=true,Margin=new Padding(0,0,0,8)},1,0);
+            Drive.Margin=new Padding(0,3,12,3);Folder.Margin=new Padding(0,3,12,3);
+            browse.AutoSize=true;browse.MinimumSize=new Size(96,32);browse.Margin=new Padding(0);
+            Controls.Add(Drive,0,1);Controls.Add(Folder,1,1);Controls.Add(browse,2,1);
+            foreach(var drive in DriveInfo.GetDrives()) {
+                try { if((drive.DriveType==DriveType.Fixed||drive.DriveType==DriveType.Removable)&&drive.IsReady)Drive.Items.Add(drive.Name); } catch(IOException) {} catch(UnauthorizedAccessException) {}
+            }
+            Drive.SelectedIndexChanged+=(s,e)=>Publish();Folder.TextChanged+=(s,e)=>Publish();
+            model.TextChanged+=(s,e)=>ReadModel();model.EnabledChanged+=(s,e)=>Enabled=model.Enabled;
+            ReadModel();
+        }
+        void ReadModel() {
+            if(syncing)return;syncing=true;
+            try {
+                string text=model.Text.Replace('/','\\');
+                if(text.Length>=3&&Char.IsLetter(text[0])&&text[1]==':'&&text[2]=='\\') {
+                    string root=text.Substring(0,3).ToUpperInvariant();int index=Drive.FindStringExact(root);
+                    Drive.SelectedIndex=index;Folder.Text=index>=0?text.Substring(3):text;
+                } else Folder.Text=text;
+            } finally {syncing=false;}
+        }
+        void Publish() {
+            if(syncing)return;
+            string text=Folder.Text.Replace('/','\\');
+            // Pasting a complete path also changes the selected drive. UNC,
+            // rooted and drive-relative input stays invalid, never rewritten.
+            if(text.Length>=3&&Char.IsLetter(text[0])&&text[1]==':'&&text[2]=='\\') {model.Text=text;ReadModel();return;}
+            syncing=true;
+            try {model.Text=text.StartsWith("\\")||text.IndexOf(':')>=0||Drive.SelectedItem==null?String.Empty:(string)Drive.SelectedItem+text;}
+            finally {syncing=false;}
+        }
+    }
     static void WizardLayout(Form form,Label title,Label intro,Label label,TextBox path,Button browse,Label status,CheckBox desktop,CheckBox menu,Label note,Button install,Button cancel) {
-        form.SuspendLayout();form.Controls.Clear();form.FormBorderStyle=FormBorderStyle.Sizable;
-        form.MinimumSize=new Size(600,440);form.ClientSize=new Size(700,530);
+        form.SuspendLayout();form.Controls.Clear();form.FormBorderStyle=FormBorderStyle.FixedDialog;form.MaximizeBox=false;
+        form.ClientSize=new Size(720,460);
         form.AutoScaleDimensions=new SizeF(96,96);form.AutoScaleMode=AutoScaleMode.Dpi;
-        var body=new Panel {Dock=DockStyle.Fill,AutoScroll=true};var column=Column();body.Controls.Add(column);
+        var body=new Panel {Dock=DockStyle.Fill};var column=Column();body.Controls.Add(column);
         var footer=Buttons(install,cancel);form.Controls.Add(body);form.Controls.Add(footer);
-        WrapIn(column,title);WrapIn(column,intro);WrapIn(column,label);
-        var location=new TableLayoutPanel {AutoSize=true,ColumnCount=2};
-        location.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));location.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        path.Dock=DockStyle.Fill;path.Margin=new Padding(0,4,8,4);browse.AutoSize=true;browse.MinimumSize=new Size(112,34);
-        location.Controls.Add(path,0,0);location.Controls.Add(browse,1,0);Row(column,location);
-        WrapIn(column,status);
+        WrapIn(column,title);title.Margin=new Padding(0,0,0,8);
+        WrapIn(column,intro);intro.Margin=new Padding(0,0,0,22);
+        WrapIn(column,label);label.Font=new Font(form.Font,FontStyle.Bold);label.Margin=new Padding(0,0,0,12);
+        Row(column,new LocationEditor(path,browse));
+        WrapIn(column,status);status.MinimumSize=new Size(0,26);status.Margin=new Padding(0,6,0,14);
         var choices=new FlowLayoutPanel {AutoSize=true,WrapContents=true};
-        desktop.AutoSize=true;menu.AutoSize=true;desktop.Margin=new Padding(0,4,20,4);menu.Margin=new Padding(0,4,0,4);
-        choices.Controls.AddRange(new Control[]{desktop,menu});Row(column,choices);WrapIn(column,note);
-        Theme(form,install);status.ForeColor=Color.FromArgb(100,105,118);
+        desktop.AutoSize=true;menu.AutoSize=true;desktop.Margin=new Padding(0,4,24,4);menu.Margin=new Padding(0,4,0,4);
+        choices.Controls.AddRange(new Control[]{desktop,menu});Row(column,choices);
+        WrapIn(column,note);note.Margin=new Padding(0,14,0,0);
+        Theme(form,install);intro.ForeColor=note.ForeColor=Color.FromArgb(100,105,118);
+        footer.BackColor=Color.FromArgb(247,248,250);
+        form.CancelButton=cancel;
+        form.Shown+=(s,e)=>{
+            // Fit the content, not an arbitrary tall window. Only small screens
+            // need scrolling; the action row always remains visible.
+            int chrome=form.Height-form.ClientSize.Height;
+            int height=column.PreferredSize.Height+footer.Height;
+            int available=Screen.FromControl(form).WorkingArea.Height-chrome-24;
+            form.ClientSize=new Size(form.ClientSize.Width,Math.Min(height,available));
+            body.AutoScroll=height>available;
+        };
         form.ResumeLayout(true);
     }
-    static string ChooseFolder(Form owner) {
+    static string ChooseFolder(Form owner,string initial) {
+        string selected=null;
+        using(var picker=CreateFolderPicker(owner,BrowseStart(initial),value=>selected=value))picker.ShowDialog(owner);
+        return selected;
+    }
+    static string BrowseStart(string initial) {
+        try {
+            string folder=CheckLocal(initial,true);
+            while(!Directory.Exists(folder))folder=Path.GetDirectoryName(folder);
+            return CheckLocal(folder,true);
+        } catch {return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);}
+    }
+    static Form CreateFolderPicker(Form owner,string initial,Action<string> selected) {
         var picker=new Form {Text="选择本地父目录",ClientSize=new Size(680,560),MinimumSize=new Size(600,460),StartPosition=FormStartPosition.CenterParent,Font=owner.Font,AutoScaleDimensions=new SizeF(96,96),AutoScaleMode=AutoScaleMode.Dpi};
         picker.Icon=owner.Icon;
-        var path=new TextBox {Left=20,Top=20,Width=480,Text=Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)};
+        var path=new TextBox {Left=20,Top=20,Width=480,Text=initial};
         var up=new Button {Text="上级",Left=510,Top=18,Width=90};
-        var drives=new ComboBox {Left=20,Top=56,Width=580,DropDownStyle=ComboBoxStyle.DropDownList};
-        foreach(var drive in DriveInfo.GetDrives()) if(drive.DriveType==DriveType.Fixed||drive.DriveType==DriveType.Removable)drives.Items.Add(drive.Name);
         var listing=new ListBox {Left=20,Top=94,Width=580,Height=290};
         var note=new Label {Left=20,Top=390,Width=580,Height=30};
-        var choose=new Button {Text="选择此目录",Left=470,Top=432,Width=130};
-        string selected=null,current=null;
+        var choose=new Button {Name="ChooseDirectory",Text="选择此目录",Left=470,Top=432,Width=130};
+        string current=null;
         Action refresh=()=>{try{
             string folder=CheckLocal(path.Text,true);
             if(!Directory.Exists(folder))throw new IOException();
@@ -246,31 +312,33 @@ internal static partial class Installer {
                 if(listing.Items.Count>=10000)break;
             }
             note.Text="仅列出本地目录，不加载系统云盘扩展。";
-        }catch{note.Text="路径未完成、不可访问或不属于本地目录。";}};
+            choose.Enabled=true;
+        }catch{current=null;listing.Items.Clear();choose.Enabled=false;note.Text="路径未完成、不可访问或不属于本地目录。";}};
         var delay=new Timer {Interval=300};
         delay.Tick+=(sender,e)=>{delay.Stop();refresh();};
-        path.TextChanged+=(sender,e)=>{delay.Stop();delay.Start();};
+        path.TextChanged+=(sender,e)=>{current=null;listing.Items.Clear();choose.Enabled=false;delay.Stop();delay.Start();};
         up.Click+=(sender,e)=>{if(current!=null){string parent=Path.GetDirectoryName(current);if(parent!=null)path.Text=parent;}};
-        drives.SelectedIndexChanged+=(sender,e)=>path.Text=(string)drives.SelectedItem;
         listing.DoubleClick+=(sender,e)=>{if(current!=null&&listing.SelectedItem!=null)path.Text=Path.Combine(current,(string)listing.SelectedItem);};
-        choose.Click+=(sender,e)=>{try{string folder=CheckLocal(path.Text,true);if(!Directory.Exists(folder))throw new IOException();selected=folder;picker.Close();}catch{note.Text="请选择有效的本地目录。";}};
+        choose.Click+=(sender,e)=>{try{string folder=CheckLocal(path.Text,true);if(!Directory.Exists(folder))throw new IOException();selected(folder);picker.Close();}catch{note.Text="请选择有效的本地目录。";}};
         picker.FormClosed+=(sender,e)=>{delay.Stop();delay.Dispose();};
-        var layout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=5,Padding=new Padding(20)};
-        for(int i=0;i<5;i++)layout.RowStyles.Add(new RowStyle(i==2?SizeType.Percent:SizeType.AutoSize,i==2?100:0));
-        var nav=new TableLayoutPanel {Dock=DockStyle.Fill,AutoSize=true,ColumnCount=2};
-        nav.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));nav.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        path.Dock=DockStyle.Fill;up.AutoSize=true;path.Margin=new Padding(0,4,8,4);nav.Controls.Add(path,0,0);nav.Controls.Add(up,1,0);
-        drives.Dock=DockStyle.Fill;listing.Dock=DockStyle.Fill;listing.HorizontalScrollbar=true;
+        var layout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=4,Padding=new Padding(24)};
+        for(int i=0;i<4;i++)layout.RowStyles.Add(new RowStyle(i==1?SizeType.Percent:SizeType.AutoSize,i==1?100:0));
+        var nav=new LocationEditor(path,up);nav.Margin=new Padding(0,0,0,16);
+        listing.Dock=DockStyle.Fill;listing.HorizontalScrollbar=true;listing.IntegralHeight=false;listing.Margin=new Padding(0,0,0,12);
         note.AutoSize=true;note.Dock=DockStyle.Top;
         layout.SizeChanged+=(sender,e)=>note.MaximumSize=new Size(Math.Max(100,layout.ClientSize.Width-40),0);
-        layout.Controls.Add(nav,0,0);layout.Controls.Add(drives,0,1);layout.Controls.Add(listing,0,2);layout.Controls.Add(note,0,3);
-        var footer=Buttons(choose);layout.Controls.Add(footer,0,4);
-        picker.Controls.Add(layout);Theme(picker,choose);refresh();picker.ShowDialog(owner);picker.Dispose();return selected;
+        layout.Controls.Add(nav,0,0);layout.Controls.Add(listing,0,1);layout.Controls.Add(note,0,2);
+        var footer=Buttons(choose);layout.Controls.Add(footer,0,3);
+        picker.Controls.Add(layout);Theme(picker,choose);refresh();return picker;
     }
     [STAThread] static int Main(string[] args) {
         if(args.Length==2 && args[0]=="--test-install") {
             Console.SetError(new StreamWriter(Console.OpenStandardError(),new UTF8Encoding(false)){AutoFlush=true});
             try {
+                string testDestination=CheckLocal(args[1]);
+                string testParent=Path.GetDirectoryName(testDestination);
+                if(Exists(testDestination)||Exists(Path.Combine(testParent,"shortcut-test"))||Exists(Path.Combine(testParent,"unrelated-folder")))
+                    throw new IOException("测试模式仅允许全新的隔离目录，不能用于已有安装或已有测试文件夹。");
                 string dest=Extract(args[1],true);
                 // Test artifacts belong outside the immutable application payload.
                 string links=Path.Combine(Path.GetDirectoryName(dest),"shortcut-test");
@@ -294,21 +362,24 @@ internal static partial class Installer {
         }
         if(args.Length!=0)return 2;
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+        Application.Run(CreateWizard());return 0;
+    }
+    static Form CreateWizard() {
         var form=new Form {Text="离线密钥柜 · 安装",ClientSize=new Size(650,400),StartPosition=FormStartPosition.CenterScreen,FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false,Font=new Font("Microsoft YaHei UI",10)};
         form.Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         var title=new Label {Text="安装离线密钥柜",Left=26,Top=24,Width=590,Height=40,Font=new Font("Microsoft YaHei UI",20,FontStyle.Bold)};
-        var intro=new Label {Text="完整离线安装 · 无需管理员权限 · 不改动已有密钥库",Left=28,Top=76,Width=590,Height=28};
-        var label=new Label {Text="安装位置（支持选择原目录升级）",Left=28,Top=119,Width=590,Height=28};
+        var intro=new Label {Text="完全离线，无需管理员权限。已有密钥库与设置会保留。",Left=28,Top=76,Width=590,Height=28};
+        var label=new Label {Text="安装位置",Left=28,Top=119,Width=590,Height=28};
         var path=new TextBox {Left=28,Top=151,Width=470,Text=DefaultPath()};
-        var browse=new Button {Text="选择位置…",Left=506,Top=148,Width=112,Height=30};
-        browse.Click+=(sender,e)=>{string chosen=ChooseFolder(form);if(chosen!=null)path.Text=LooksInstalled(chosen)?chosen:Path.Combine(chosen,"OfflineKeyVault");};
+        var browse=new Button {Text="浏览…",Left=506,Top=148,Width=112,Height=30};
+        browse.Click+=(sender,e)=>{string chosen=ChooseFolder(form,path.Text);if(chosen!=null)path.Text=LooksInstalled(chosen)?chosen:Path.Combine(chosen,"OfflineKeyVault");};
         var status=new Label {Left=28,Top=186,Width=590,Height=40,ForeColor=Color.DimGray};
         var desktop=new CheckBox {Text="创建 / 更新桌面快捷方式",Left=28,Top=233,Width=260,Checked=true};
         var menu=new CheckBox {Text="创建 / 更新开始菜单快捷方式",Left=315,Top=233,Width=280,Checked=true};
-        var note=new Label {Text="升级仅替换程序文件，保留密钥库与设置；旧程序保留为回滚备份。\n请先关闭密钥柜，选择非云同步目录。完成后不会自动启动。",Left=28,Top=276,Width=590,Height=48};
+        var note=new Label {Text="选择原安装目录即可升级，旧程序会保留为回滚备份。\n请先关闭密钥柜，避免使用云同步目录。",Left=28,Top=276,Width=590,Height=48};
         var install=new Button {Text="安装",Left=492,Top=342,Width=126,Height=38,BackColor=Color.FromArgb(220,53,69),ForeColor=Color.White,FlatStyle=FlatStyle.Flat};
         var cancel=new Button {Text="取消",Left=350,Top=342,Width=126,Height=38};
-        Action check=()=>{try{string value=CheckLocal(path.Text);bool upgrade=LooksInstalled(value);install.Text=upgrade?"升级":"安装";status.Text=upgrade?"检测到已有安装，将原位升级并保留个人数据。":Directory.Exists(value)?"此目录不是可识别的程序目录，安装时不会覆盖。":"路径可用，将在安装时创建文件夹。";}catch{status.Text="请输入允许的本地绝对路径。";}};
+        Action check=()=>{try{string value=CheckLocal(path.Text);bool upgrade=LooksInstalled(value);install.Enabled=upgrade||!Directory.Exists(value);install.Text=upgrade?"升级":"安装";status.ForeColor=install.Enabled?Color.FromArgb(73,105,91):Color.FromArgb(180,45,60);status.Text=upgrade?"检测到已有安装，将在原目录升级并保留个人数据。":Directory.Exists(value)?"此文件夹已有其他内容，请选择空的新路径或原安装目录。":"路径可用，将在安装时创建文件夹。";}catch{install.Enabled=false;status.ForeColor=Color.FromArgb(180,45,60);status.Text="请选择本地磁盘，并输入有效的文件夹路径。";}};
         path.TextChanged+=(sender,e)=>check(); check();
         cancel.Click+=(sender,e)=>form.Close();
         install.Click+=(sender,e)=>{
@@ -325,9 +396,9 @@ internal static partial class Installer {
                 MessageBox.Show(form,"程序已安装到：\n"+destination+(issues.Count==0?"\n快捷方式按所选项创建。":"\n部分快捷方式未创建：\n"+String.Join("\n",issues.ToArray()))+"\n可直接打开目录中的 OfflineKeyVault.exe。","安装完成",MessageBoxButtons.OK,issues.Count==0?MessageBoxIcon.Information:MessageBoxIcon.Warning);
                 form.Close();
             }catch(Exception error){MessageBox.Show(form,error.Message,"安装未完成",MessageBoxButtons.OK,MessageBoxIcon.Error);}
-            finally{if(!form.IsDisposed){install.Enabled=true;path.Enabled=true;browse.Enabled=true;desktop.Enabled=true;menu.Enabled=true;cancel.Enabled=true;}}
+            finally{if(!form.IsDisposed){path.Enabled=true;browse.Enabled=true;desktop.Enabled=true;menu.Enabled=true;cancel.Enabled=true;check();}}
         };
         WizardLayout(form,title,intro,label,path,browse,status,desktop,menu,note,install,cancel);
-        Application.Run(form);return 0;
+        check();return form;
     }
 }

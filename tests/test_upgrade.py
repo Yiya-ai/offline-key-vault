@@ -28,6 +28,13 @@ internal static partial class Installer {
     static void Assert(bool value) {if(!value)throw new Exception("Synthetic upgrade assertion failed");}
     public static string Test(string mode,string folder) {
         string dest=Path.Combine(folder,"installed"),stage=Path.Combine(folder,"staged");
+        if(mode.StartsWith("test-mode-")) {
+            string existing=mode=="test-mode-existing"?dest:Path.Combine(folder,mode=="test-mode-shortcut"?"shortcut-test":"unrelated-folder");
+            Directory.CreateDirectory(existing);string sentinel=Path.Combine(existing,"keep.txt");File.WriteAllText(sentinel,"preserve user data");
+            Assert(Main(new[]{"--test-install",dest})!=0);
+            Assert(File.ReadAllText(sentinel)=="preserve user data");
+            Assert(Directory.GetDirectories(folder,".offline-key-vault-install-*").Length==0);return "passed";
+        }
         if(mode=="shortcut-update"||mode=="shortcut-unrelated") {
             Directory.CreateDirectory(dest);Directory.CreateDirectory(stage);
             string links=Path.Combine(folder,"shortcuts"),owner=mode=="shortcut-update"?dest:stage;
@@ -120,10 +127,10 @@ def compiled(tmp_path_factory):
 def invoke(compiled, mode, folder):
     dll, script, _ = compiled
     return subprocess.run(['powershell.exe', '-NoProfile', '-File', str(script), str(dll), mode,
-                           str(folder)], capture_output=True, text=True, timeout=30)
+                           str(folder)], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
 
 
-@pytest.mark.parametrize('mode', ['success', 'verify-fail', 'move-fail', 'transient-rename', 'blocked-rename', 'tampered', 'extra', 'collision', 'traversal', 'journal-invalid', 'guard-running', 'guard-launch', 'shortcut-update', 'shortcut-unrelated'])
+@pytest.mark.parametrize('mode', ['success', 'verify-fail', 'move-fail', 'transient-rename', 'blocked-rename', 'tampered', 'extra', 'collision', 'traversal', 'journal-invalid', 'guard-running', 'guard-launch', 'shortcut-update', 'shortcut-unrelated', 'test-mode-existing', 'test-mode-shortcut', 'test-mode-unrelated'])
 def test_upgrade_transaction(compiled, tmp_path, mode):
     if mode.startswith('guard-'):
         import shutil

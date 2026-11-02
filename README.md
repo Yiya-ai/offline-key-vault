@@ -89,6 +89,8 @@ For macOS 15+, download the matching arm64 or x86_64 DMG, open it and drag the a
 
 ## Desktop installer and interaction improvements
 
+The Windows installer separates the installation location into a local drive selector and a folder path, for example `D:\` + `Apps\OfflineKeyVault`. Pasting a complete local path fills both fields. The directory browser uses the same layout and refreshes as you type; invalid paths disable confirmation. The installer sizes itself to its content, with scrolling only when the available screen height is insufficient.
+
 The Windows standard installer uses bounded retries when creating staged output files temporarily returns access denied or a sharing error. It never truncates existing staged files or retries a partially written stream, and stops if access remains denied. In-place upgrades use journaled renames of managed program components. No antivirus or system protection change is required. Published versions and verified download assets are listed in [GitHub Releases](https://github.com/Yiya-ai/offline-key-vault/releases).
 
 On Windows, close the app and open `dist/offline-key-vault-setup.exe`. Select the existing installation directory to upgrade in place; the default location is detected from the standard desktop or Start menu shortcut when available. Existing shortcuts to that installation, including renamed desktop shortcuts, are refreshed automatically. Checkboxes control creation of missing standard shortcuts; unrelated targets are not overwritten. Installation remains offline and per-user, with no administrator requirement, registry entry or system service. The app is not launched automatically afterward.

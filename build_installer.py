@@ -67,6 +67,9 @@ def main():
     installed = work / '安装 验证'
     print('Testing actual install, in-place upgrade, data preservation and shortcut updates...', flush=True)
     run_checked([output, '--test-install', installed], cwd=work)
+    refusal = subprocess.run([str(output), '--test-install', str(installed)], cwd=work, capture_output=True, timeout=30)
+    if refusal.returncode == 0:
+        raise RuntimeError('Test mode accepted an existing installation')
     verify_executable_icon(installed / 'OfflineKeyVault.exe')
     if not (work / 'shortcut-test/OfflineKeyVault-Test.lnk').is_file():
         raise RuntimeError('Shortcut verification failed')
@@ -77,6 +80,7 @@ def main():
     report = {'ok': True, 'install_verified': True, 'shortcut_target_verified': True,
               'embedded_icons_verified': True, 'shortcut_icon_verified': True,
               'in_place_upgrade_verified': True, 'user_data_preserved': True, 'shortcut_update_verified': True,
+              'test_mode_existing_refused': True,
               'unrelated_folder_preserved': True, 'real_desktop_untouched': True,
               'sources': {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs')},
               'artifact': target.name, 'sha256': digest(target)}
