@@ -11,6 +11,14 @@ internal static class Launcher
     // Replaced by the local builder after generating the payload manifest.
     const string ManifestSha256 = "__MANIFEST_SHA256__";
 
+    static bool IsUserData(string relative) {
+        string top=relative.Split('/')[0];
+        if(top.Equals("app",StringComparison.OrdinalIgnoreCase)||top.Equals("runtime",StringComparison.OrdinalIgnoreCase)||top.Equals("licenses",StringComparison.OrdinalIgnoreCase))return false;
+        if(Array.IndexOf(new[]{"id_rsa","id_ed25519","id_ecdsa","id_dsa","id_xmss"},Path.GetFileName(relative).ToLowerInvariant())>=0)return true;
+        string extension=Path.GetExtension(relative).ToLowerInvariant();
+        return Array.IndexOf(new[]{".okv",".okvr",".lock",".pem",".key",".der",".pub",".jwk",".p12",".pfx",".jks",".ppk",".asc",".pgp",".gpg",".crt",".cer",".p7b",".p7c",".raw",".txt",".json",".md",".tmp",".bak"},extension)>=0;
+    }
+
     static void CheckInventory(string directory, string root, HashSet<string> seen)
     {
         CheckPath(directory);
@@ -22,8 +30,8 @@ internal static class Launcher
             else
             {
                 var relative = entry.Substring(root.Length + 1).Replace('\\', '/');
-                if (relative == "OfflineKeyVault.exe" || relative == "manifest.sha256") continue;
-                if (!seen.Contains(relative)) throw new IOException("Unexpected package file: " + relative);
+                if (relative == "OfflineKeyVault.exe" || relative == "manifest.sha256" || relative == ".offline-key-vault-upgrade") continue;
+                if (!seen.Contains(relative) && !IsUserData(relative)) throw new IOException("Unexpected package file: " + relative);
             }
         }
     }
@@ -111,6 +119,8 @@ internal static class Launcher
             }
             if (args.Length > 0 && !diagnostic) throw new ArgumentException("Unsupported arguments.");
             string root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            if(File.Exists(Path.Combine(root,".offline-key-vault-upgrade")) && !(diagnostic&&args[0]=="--verify"))
+                throw new IOException("升级尚未完成。请关闭程序并重新运行安装器，自动恢复后再启动。");
             if (root.StartsWith(@"\\")) throw new IOException("Extract to a local directory first.");
             var drive = new DriveInfo(Path.GetPathRoot(root));
             if (drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Removable)

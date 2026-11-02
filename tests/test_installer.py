@@ -75,7 +75,7 @@ def compiled_installer(tmp_path_factory):
     compiler = Path(os.environ['SystemRoot']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     subprocess.run([str(compiler), '/nologo', '/target:library',
                     '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
-                    '/out:' + str(dll), str(ROOT / 'packaging/Installer.cs'), str(harness)], check=True, capture_output=True)
+                    '/out:' + str(dll), str(ROOT / 'packaging/Installer.cs'), str(ROOT / 'packaging/Upgrade.cs'), str(harness)], check=True, capture_output=True)
     script = work / 'Run.ps1'
     script.write_text("param($Assembly,$Mode,$Folder)\n$ErrorActionPreference='Stop'\nAdd-Type -Path $Assembly\n[InstallerIOTests]::Run($Mode,$Folder)\n", encoding='utf-8')
     return dll, script
@@ -88,3 +88,20 @@ def test_installer_output_creation(compiled_installer, tmp_path, mode):
                              str(tmp_path)], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'passed'
+
+
+def test_locked_previous_installer_is_kept_and_new_artifact_is_published(tmp_path):
+    from build_installer import publish_artifact
+    work = tmp_path / 'build'
+    dist = tmp_path / 'dist'
+    work.mkdir()
+    dist.mkdir()
+    output = work / 'offline-key-vault-setup.exe'
+    target = dist / output.name
+    output.write_bytes(b'synthetic new installer')
+    target.write_bytes(b'synthetic previous installer')
+    with target.open('rb'):
+        published = publish_artifact(output, dist)
+    assert published != target
+    assert published.read_bytes() == b'synthetic new installer'
+    assert target.read_bytes() == b'synthetic previous installer'

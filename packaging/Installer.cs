@@ -11,10 +11,15 @@ using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using Microsoft.Win32.SafeHandles;
 
-internal static class Installer {
+internal static partial class Installer {
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
     static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
-    static string DefaultPath() { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "OfflineKeyVault"); }
+    static string DefaultPath() {
+        foreach(string link in new[]{Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"离线密钥柜.lnk"),Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"OfflineKeyVault","离线密钥柜.lnk")}) {
+            try { string target=ReadShortcutTarget(link); if(String.Equals(Path.GetFileName(target),"OfflineKeyVault.exe",StringComparison.OrdinalIgnoreCase)) {string folder=CheckLocal(Path.GetDirectoryName(target));if(LooksInstalled(folder))return folder;} } catch {}
+        }
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "OfflineKeyVault");
+    }
     static string CheckLocal(string path, bool allowRoot=false) {
         if (String.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path) || path.StartsWith(@"\\") || path.StartsWith("//"))
             throw new IOException("请选择普通本地磁盘的完整路径，不允许网络或设备路径。");
@@ -83,12 +88,21 @@ internal static class Installer {
     }
     static string Extract(string destination, bool fullTest) {
         destination=CheckLocal(destination);
-        if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("目标已存在。请选择新的安装文件夹，避免覆盖旧程序和密钥。");
         string parent=CheckLocal(Path.GetDirectoryName(destination),true);
         Directory.CreateDirectory(parent); CheckLocal(parent,true);
         var pins=Pin(parent);
+        System.Threading.Mutex gate=null;
+        var guards=new List<FileStream>();
         string stage=Path.Combine(parent, ".offline-key-vault-install-"+Guid.NewGuid().ToString("N"));
         try {
+            gate=InstallationGate(destination);
+            if(Directory.Exists(destination)) {
+                if(!LooksInstalled(destination))throw new IOException("此目录不是可识别的密钥柜安装目录，未改动其中的文件。");
+                guards=GuardApplications(destination);
+                bool recovering=File.Exists(Path.Combine(destination,UpgradeJournal));
+                RecoverUpgrade(destination);
+                if(recovering){foreach(var h in guards)h.Dispose();guards=GuardApplications(destination);}
+            }
             Directory.CreateDirectory(stage);
             var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             using(var input=Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip"))
@@ -107,16 +121,22 @@ internal static class Installer {
                     Directory.CreateDirectory(Path.GetDirectoryName(output)); CheckLocal(Path.GetDirectoryName(output));
                     var outputPins=Pin(Path.GetDirectoryName(output));
                     try {
-                        using(var source=entry.Open()) using(var stream=OpenNewOutput(output)) source.CopyTo(stream);
+                        // Publish each complete file atomically; never expose a half-written DLL.
+                        string pending=Path.Combine(stage,".okv-extract-"+Guid.NewGuid().ToString("N")+".tmp");
+                        using(var source=entry.Open())using(var stream=OpenNewOutput(pending)) {
+                            source.CopyTo(stream);
+                            if(stream.Length!=entry.Length)throw new IOException("安装包文件长度不符。");
+                        }
+                        MoveComponent(pending,output);
                     } finally { foreach(var h in outputPins) h.Dispose(); }
                 }
             }
             Verify(stage, "--verify");
             if (fullTest) Verify(stage,"--self-test");
-            // No overwrite or recursive removal. A failed attempt leaves its isolated staging directory.
-            Directory.Move(stage,destination);
+            if(Directory.Exists(destination)) ApplyUpgrade(destination,stage,folder=>Verify(folder,"--verify"),null);
+            else Directory.Move(stage,destination);
             return destination;
-        } finally { foreach(var h in pins) h.Dispose(); }
+        } finally { foreach(var h in guards) h.Dispose(); if(gate!=null){gate.ReleaseMutex();gate.Dispose();}foreach(var h in pins) h.Dispose(); }
     }
     static void Shortcut(string folder,string installed,string name) {
         folder=CheckLocal(folder);
@@ -125,10 +145,14 @@ internal static class Installer {
         object shell=null,link=null;
         try {
             string path=Path.Combine(folder,name+".lnk");
-            if (File.Exists(path)||Directory.Exists(path)) throw new IOException("快捷方式已存在，未覆盖："+name);
+            bool replacing=File.Exists(path);
+            if(Directory.Exists(path))throw new IOException("快捷方式名称被目录占用："+name);
+            if(replacing && !String.Equals(ReadShortcutTarget(path),Path.Combine(installed,"OfflineKeyVault.exe"),StringComparison.OrdinalIgnoreCase))
+                throw new IOException("同名快捷方式指向其他程序或安装目录，未覆盖："+name);
+            string temporary=Path.Combine(folder,".okv-shortcut-"+Guid.NewGuid().ToString("N")+".lnk");
             Type type=Type.GetTypeFromProgID("WScript.Shell",true);
             shell=Activator.CreateInstance(type);
-            link=type.InvokeMember("CreateShortcut",BindingFlags.InvokeMethod,null,shell,new object[]{path});
+            link=type.InvokeMember("CreateShortcut",BindingFlags.InvokeMethod,null,shell,new object[]{temporary});
             Type lt=link.GetType();
             lt.InvokeMember("TargetPath",BindingFlags.SetProperty,null,link,new object[]{Path.Combine(installed,"OfflineKeyVault.exe")});
             lt.InvokeMember("WorkingDirectory",BindingFlags.SetProperty,null,link,new object[]{installed});
@@ -136,6 +160,10 @@ internal static class Installer {
             string iconLocation=Path.Combine(installed,"OfflineKeyVault.exe")+",0";
             lt.InvokeMember("IconLocation",BindingFlags.SetProperty,null,link,new object[]{iconLocation});
             lt.InvokeMember("Save",BindingFlags.InvokeMethod,null,link,null);
+            Marshal.FinalReleaseComObject(link);link=null;
+            if(!String.Equals(ReadShortcutTarget(temporary),Path.Combine(installed,"OfflineKeyVault.exe"),StringComparison.OrdinalIgnoreCase))throw new IOException("快捷方式保存校验失败。");
+            if(replacing)File.Replace(temporary,path,null);else File.Move(temporary,path);
+            link=type.InvokeMember("CreateShortcut",BindingFlags.InvokeMethod,null,shell,new object[]{path});lt=link.GetType();
             if (!File.Exists(path)) throw new IOException("快捷方式未创建。");
             object target=lt.InvokeMember("TargetPath",BindingFlags.GetProperty,null,link,null);
             if (!String.Equals((string)target,Path.Combine(installed,"OfflineKeyVault.exe"),StringComparison.OrdinalIgnoreCase)) throw new IOException("快捷方式目标校验失败。");
@@ -245,13 +273,24 @@ internal static class Installer {
             try {
                 string dest=Extract(args[1],true);
                 // Test artifacts belong outside the immutable application payload.
-                Shortcut(Path.Combine(Path.GetDirectoryName(dest),"shortcut-test"),dest,"OfflineKeyVault-Test");
+                string links=Path.Combine(Path.GetDirectoryName(dest),"shortcut-test");
+                Shortcut(links,dest,"OfflineKeyVault-Test");
+                Directory.CreateDirectory(Path.Combine(dest,"vaults"));
+                string vault=Path.Combine(dest,"vaults","synthetic.okv"),settings=Path.Combine(dest,".offline-key-vault-preferences.json");
+                File.WriteAllText(vault,"synthetic encrypted vault placeholder");File.WriteAllText(settings,"synthetic settings placeholder");
+                string originalVault=FileDigest(vault),originalSettings=FileDigest(settings);
+                Extract(dest,false);
+                Shortcut(links,dest,"OfflineKeyVault-Test");
+                if(FileDigest(vault)!=originalVault||FileDigest(settings)!=originalSettings)throw new IOException("升级改变了用户数据。");
                 Verify(dest,"--verify");
+                // Ordinary unrelated folders must still never be overwritten.
+                string unrelated=Path.Combine(Path.GetDirectoryName(dest),"unrelated-folder");Directory.CreateDirectory(unrelated);
+                File.WriteAllText(Path.Combine(unrelated,"keep.txt"),"preserve unrelated content");
                 bool rejected=false;
-                try { Extract(dest,false); } catch(IOException) { rejected=true; }
-                if(!rejected) return 2;
+                try { Extract(unrelated,false); } catch(IOException) { rejected=true; }
+                if(!rejected || File.ReadAllText(Path.Combine(unrelated,"keep.txt"))!="preserve unrelated content") return 2;
                 return 0;
-            } catch(Exception error) {Console.Error.WriteLine("Installer test failed: "+error.GetType().Name+" (0x"+error.HResult.ToString("X8")+"): "+error.Message);return 1;}
+            } catch(Exception error) {Console.Error.WriteLine("Installer test failed: "+error.GetType().Name+" (0x"+error.HResult.ToString("X8")+"): "+error.Message+"\nCause: "+error.GetBaseException().Message);return 1;}
         }
         if(args.Length!=0)return 2;
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
@@ -259,31 +298,33 @@ internal static class Installer {
         form.Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         var title=new Label {Text="安装离线密钥柜",Left=26,Top=24,Width=590,Height=40,Font=new Font("Microsoft YaHei UI",20,FontStyle.Bold)};
         var intro=new Label {Text="完整离线安装 · 无需管理员权限 · 不改动已有密钥库",Left=28,Top=76,Width=590,Height=28};
-        var label=new Label {Text="安装位置（输入新的本地文件夹路径）",Left=28,Top=119,Width=590,Height=28};
+        var label=new Label {Text="安装位置（支持选择原目录升级）",Left=28,Top=119,Width=590,Height=28};
         var path=new TextBox {Left=28,Top=151,Width=470,Text=DefaultPath()};
         var browse=new Button {Text="选择位置…",Left=506,Top=148,Width=112,Height=30};
-        browse.Click+=(sender,e)=>{string chosen=ChooseFolder(form);if(chosen!=null)path.Text=Path.Combine(chosen,"OfflineKeyVault");};
+        browse.Click+=(sender,e)=>{string chosen=ChooseFolder(form);if(chosen!=null)path.Text=LooksInstalled(chosen)?chosen:Path.Combine(chosen,"OfflineKeyVault");};
         var status=new Label {Left=28,Top=186,Width=590,Height=40,ForeColor=Color.DimGray};
-        var desktop=new CheckBox {Text="创建桌面快捷方式",Left=28,Top=233,Width=260,Checked=true};
-        var menu=new CheckBox {Text="创建开始菜单快捷方式",Left=315,Top=233,Width=280,Checked=true};
-        var note=new Label {Text="已有目录不会覆盖；升级请安装到新目录，再打开旧库。\n请选择非云同步目录。安装程序不会自动启动应用。",Left=28,Top=276,Width=590,Height=48};
+        var desktop=new CheckBox {Text="创建 / 更新桌面快捷方式",Left=28,Top=233,Width=260,Checked=true};
+        var menu=new CheckBox {Text="创建 / 更新开始菜单快捷方式",Left=315,Top=233,Width=280,Checked=true};
+        var note=new Label {Text="升级仅替换程序文件，保留密钥库与设置；旧程序保留为回滚备份。\n请先关闭密钥柜，选择非云同步目录。完成后不会自动启动。",Left=28,Top=276,Width=590,Height=48};
         var install=new Button {Text="安装",Left=492,Top=342,Width=126,Height=38,BackColor=Color.FromArgb(220,53,69),ForeColor=Color.White,FlatStyle=FlatStyle.Flat};
         var cancel=new Button {Text="取消",Left=350,Top=342,Width=126,Height=38};
-        Action check=()=>{try{string value=CheckLocal(path.Text);status.Text=Directory.Exists(value)||File.Exists(value)?"目录已存在，请换一个新文件夹名称。":"路径可用，将在安装时创建文件夹。";}catch{status.Text="请输入允许的本地绝对路径。";}};
+        Action check=()=>{try{string value=CheckLocal(path.Text);bool upgrade=LooksInstalled(value);install.Text=upgrade?"升级":"安装";status.Text=upgrade?"检测到已有安装，将原位升级并保留个人数据。":Directory.Exists(value)?"此目录不是可识别的程序目录，安装时不会覆盖。":"路径可用，将在安装时创建文件夹。";}catch{status.Text="请输入允许的本地绝对路径。";}};
         path.TextChanged+=(sender,e)=>check(); check();
         cancel.Click+=(sender,e)=>form.Close();
         install.Click+=(sender,e)=>{
             string destination=null;
             try {
                 install.Enabled=false;path.Enabled=false;browse.Enabled=false;desktop.Enabled=false;menu.Enabled=false;cancel.Enabled=false;
-                status.Text="正在解压和验证，请稍候…";form.Refresh();
+                status.Text="正在验证与安装 / 升级，请稍候…";form.Refresh();
                 destination=Extract(path.Text,false);
                 var issues=new List<string>();
+                UpdateExistingShortcuts(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),destination,issues);
+                UpdateExistingShortcuts(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"OfflineKeyVault"),destination,issues);
                 if(desktop.Checked)try{Shortcut(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),destination,"离线密钥柜");}catch(Exception error){issues.Add(error.Message);}
                 if(menu.Checked)try{Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"OfflineKeyVault"),destination,"离线密钥柜");}catch(Exception error){issues.Add(error.Message);}
                 MessageBox.Show(form,"程序已安装到：\n"+destination+(issues.Count==0?"\n快捷方式按所选项创建。":"\n部分快捷方式未创建：\n"+String.Join("\n",issues.ToArray()))+"\n可直接打开目录中的 OfflineKeyVault.exe。","安装完成",MessageBoxButtons.OK,issues.Count==0?MessageBoxIcon.Information:MessageBoxIcon.Warning);
                 form.Close();
-            }catch(Exception error){MessageBox.Show(form,error.Message+"\n安装未完成；原有程序和密钥未被覆盖。","安装未完成",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+            }catch(Exception error){MessageBox.Show(form,error.Message,"安装未完成",MessageBoxButtons.OK,MessageBoxIcon.Error);}
             finally{if(!form.IsDisposed){install.Enabled=true;path.Enabled=true;browse.Enabled=true;desktop.Enabled=true;menu.Enabled=true;cancel.Enabled=true;}}
         };
         WizardLayout(form,title,intro,label,path,browse,status,desktop,menu,note,install,cancel);

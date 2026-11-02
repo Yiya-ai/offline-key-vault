@@ -206,6 +206,7 @@ def main():
         '第三方许可证随包保存于 licenses、runtime/tcl 和各依赖 dist-info 目录。\n'
         '严格物理离线需求请在断网设备运行；详情及格式限制见 README.md。\n', encoding='utf-8-sig')
     build_info = {'platform': 'windows-x64', 'python': platform.python_version(), 'packages': runtime_packages,
+                  'launcher_source_sha256': digest(ROOT / 'packaging/Launcher.cs'),
                   'profile': 'local-pkcs11' if options.with_pkcs11 else 'standard',
                   'build': 'local-files-only', 'source_files': list(APP_FILES)}
     (bundle / 'build-info.json').write_text(json.dumps(build_info, indent=2) + '\n', encoding='utf-8')
@@ -270,6 +271,24 @@ def main():
     if failed.returncode == 0:
         raise RuntimeError('Integrity gate accepted unlisted module')
     extra.unlink()
+    # User vaults outside program trees remain usable; executable injections do not.
+    user_data = extracted / 'vaults'
+    user_data.mkdir()
+    (user_data / 'synthetic.okv').write_bytes(b'synthetic vault placeholder')
+    (extracted / '.offline-key-vault-preferences.json').write_bytes(b'{}')
+    run_checked([extracted / 'OfflineKeyVault.exe', '--verify'], cwd=work, env=env)
+    for extra in (extracted / 'injected.dll', extracted / 'runtime/extra.json'):
+        extra.write_bytes(b'synthetic unexpected content')
+        failed = subprocess.run([str(extracted / 'OfflineKeyVault.exe'), '--verify'], cwd=work, env=env, capture_output=True, timeout=30)
+        if failed.returncode == 0:
+            raise RuntimeError('Integrity gate accepted unexpected executable/runtime content')
+        extra.unlink()
+    marker = extracted / '.offline-key-vault-upgrade'
+    marker.write_bytes(b'synthetic upgrade in progress')
+    failed = subprocess.run([str(extracted / 'OfflineKeyVault.exe'), '--self-test'], cwd=work, env=env, capture_output=True, timeout=30)
+    if failed.returncode == 0:
+        raise RuntimeError('Application launched during an incomplete upgrade')
+    marker.unlink()
     run_checked([extracted / 'OfflineKeyVault.exe', '--verify'], cwd=work, env=env)
     # Only publish an archive after all checks pass. No generated vaults enter it.
     output = ROOT / 'dist' / temporary_zip.name
@@ -283,6 +302,7 @@ def main():
     report = {'ok': True, 'relocated_path_tested': True, 'host_python_removed_from_path': True,
               'external_environment_ignored': True, 'tamper_rejected': True, 'missing_file_rejected': True,
               'manifest_rewrite_rejected': True, 'unlisted_module_rejected': True,
+              'user_data_allowed': True, 'runtime_injection_rejected': True, 'incomplete_upgrade_blocked': True,
               'archive_files': len(files) + 2, 'archive_bytes': output.stat().st_size, 'sha256': digest(output)}
     (work / 'verification.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(json.dumps(report), flush=True)
