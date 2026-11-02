@@ -131,7 +131,7 @@ def compiled(tmp_path_factory):
     result = subprocess.run([str(compiler), '/nologo', '/target:library',
                              '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
                              '/out:' + str(dll), str(ROOT / 'packaging/Installer.cs'),
-                             str(ROOT / 'packaging/Upgrade.cs'), str(harness)], capture_output=True, text=True)
+                             str(ROOT / 'packaging/Upgrade.cs'), str(ROOT / 'packaging/Uninstall.cs'), str(harness)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     sleeper = work / 'Sleeper.cs'
     sleeper.write_text('class Sleeper {static void Main(){System.Threading.Thread.Sleep(60000);}}', encoding='utf-8')

@@ -207,20 +207,33 @@ def main():
         '严格物理离线需求请在断网设备运行；详情及格式限制见 README.md。\n', encoding='utf-8-sig')
     build_info = {'platform': 'windows-x64', 'python': platform.python_version(), 'packages': runtime_packages,
                   'launcher_source_sha256': digest(ROOT / 'packaging/Launcher.cs'),
+                  'uninstaller_sources': {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs')},
                   'profile': 'local-pkcs11' if options.with_pkcs11 else 'standard',
                   'build': 'local-files-only', 'source_files': list(APP_FILES)}
     (bundle / 'build-info.json').write_text(json.dumps(build_info, indent=2) + '\n', encoding='utf-8')
     files = sorted(p for p in bundle.rglob('*') if p.is_file())
     manifest = bundle / 'manifest.sha256'
     manifest.write_text(''.join(digest(p) + '  ' + p.relative_to(bundle).as_posix() + '\n' for p in files), encoding='utf-8', newline='\n')
+    from keyvault.branding import write_ico
+    icon = work / 'OfflineKeyVault.ico'
+    write_ico(icon)
+    uninstaller_source = work / 'Uninstall.cs'
+    uninstall_template = (ROOT / 'packaging/Uninstall.cs').read_text(encoding='utf-8')
+    if uninstall_template.count('__PROGRAM_MANIFEST_SHA256__') != 1:
+        raise RuntimeError('Uninstaller manifest binding template is invalid')
+    uninstaller_source.write_text(uninstall_template.replace('__PROGRAM_MANIFEST_SHA256__', digest(manifest)), encoding='utf-8')
+    uninstaller = bundle / 'Uninstall.exe'
+    run_checked([compiler, '/nologo', '/target:winexe', '/main:UninstallEntry', '/platform:x64', '/optimize+',
+                 '/win32icon:' + str(icon), '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
+                 '/out:' + str(uninstaller), ROOT / 'packaging/Installer.cs', ROOT / 'packaging/Upgrade.cs', uninstaller_source])
+    verify_executable_icon(uninstaller)
+    files.append(uninstaller)
+    manifest.write_text(manifest.read_text(encoding='utf-8') + digest(uninstaller) + '  Uninstall.exe\n', encoding='utf-8', newline='\n')
     launcher_source = work / 'Launcher.cs'
     template = (ROOT / 'packaging/Launcher.cs').read_text(encoding='utf-8')
     if template.count('__MANIFEST_SHA256__') != 1:
         raise RuntimeError('Launcher manifest binding template is invalid')
     launcher_source.write_text(template.replace('__MANIFEST_SHA256__', digest(manifest)), encoding='utf-8')
-    from keyvault.branding import write_ico
-    icon = work / 'OfflineKeyVault.ico'
-    write_ico(icon)
     run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/win32icon:' + str(icon),
                  '/r:System.Windows.Forms.dll', '/out:' + str(launcher), launcher_source])
     verify_executable_icon(launcher)

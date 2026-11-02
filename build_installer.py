@@ -42,6 +42,8 @@ def main():
         info = json.loads(z.read('OfflineKeyVault/build-info.json'))
         if info.get('launcher_source_sha256') != digest(ROOT / 'packaging/Launcher.cs'):
             raise SystemExit('Rebuild the portable ZIP: launcher source changed.')
+        if info.get('uninstaller_sources') != {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs')}:
+            raise SystemExit('Rebuild the portable ZIP: uninstaller source changed.')
         if info.get('profile') != 'standard' or 'pykcs11' in info.get('packages', {}):
             raise SystemExit('Public installer requires a freshly verified standard portable build without PyKCS11.')
         if any('pykcs11' in name.lower() for name in z.namelist()):
@@ -60,9 +62,9 @@ def main():
     from keyvault.branding import write_ico
     icon = work / 'OfflineKeyVault.ico'
     write_ico(icon)
-    run_checked([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/win32icon:' + str(icon),
+    run_checked([compiler, '/nologo', '/target:winexe', '/main:Installer', '/platform:x64', '/optimize+', '/win32icon:' + str(icon),
                  '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
-                 '/resource:' + str(archive) + ',payload.zip', '/out:' + str(output), ROOT / 'packaging/Installer.cs', ROOT / 'packaging/Upgrade.cs'])
+                 '/resource:' + str(archive) + ',payload.zip', '/out:' + str(output), ROOT / 'packaging/Installer.cs', ROOT / 'packaging/Upgrade.cs', ROOT / 'packaging/Uninstall.cs'])
     verify_executable_icon(output)
     installed = work / '安装 验证'
     print('Testing actual install, in-place upgrade, data preservation and shortcut updates...', flush=True)
@@ -73,6 +75,47 @@ def main():
     verify_executable_icon(installed / 'OfflineKeyVault.exe')
     if not (work / 'shortcut-test/OfflineKeyVault-Test.lnk').is_file():
         raise RuntimeError('Shortcut verification failed')
+    # Load the shipped uninstaller from bytes so the real file can be removed.
+    # Registration is tested in a unique namespace, never the user's app list.
+    uninstall_check = work / 'UninstallAcceptance.ps1'
+    uninstall_check.write_text(r'''param($Folder,$Links)
+$ErrorActionPreference='Stop'
+$registry='Software\OfflineKeyVaultTests\Installer-'+[guid]::NewGuid().ToString('N')
+$assembly=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes((Join-Path $Folder 'Uninstall.exe')))
+$type=$assembly.GetType('Installer')
+$flags=[Reflection.BindingFlags]'Static,NonPublic,Public'
+function Digest($Path) {
+    $stream=[IO.File]::OpenRead($Path); $hash=[Security.Cryptography.SHA256]::Create()
+    try {return [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','').ToLowerInvariant()} finally {$stream.Dispose();$hash.Dispose()}
+}
+$vault=Join-Path $Folder 'vaults\synthetic.okv'
+$settings=Join-Path $Folder '.offline-key-vault-preferences.json'
+$beforeVault=Digest $vault
+$beforeSettings=Digest $settings
+try {
+    $null=$type.GetMethod('RegisterInstallation',$flags).Invoke($null,@($Folder,$registry))
+    $name=$type.GetMethod('RegistrationName',$flags).Invoke($null,@($Folder))
+    $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($registry+'\'+$name)
+    if($null -eq $key){throw 'Missing uninstall registration'}
+    if($key.GetValue('UninstallString') -ne ('"'+(Join-Path $Folder 'Uninstall.exe')+'"')){throw 'Wrong uninstall command'}
+    $key.Dispose()
+    $expected=$type.GetField('ProgramManifestHash',$flags).GetRawConstantValue()
+    $self=Digest (Join-Path $Folder 'Uninstall.exe')
+    $parameters=New-Object object[] 5
+    $parameters[0]=$Folder; $parameters[1]=$expected; $parameters[2]=$self; $parameters[3]=$registry; $parameters[4]=[string[]]@($Links)
+    $null=$type.GetMethod('RemoveInstallation',$flags).Invoke($null,$parameters)
+    if(Test-Path -LiteralPath (Join-Path $Folder 'OfflineKeyVault.exe')){throw 'Launcher remains'}
+    if(Test-Path -LiteralPath (Join-Path $Folder 'Uninstall.exe')){throw 'Uninstaller remains'}
+    if(Test-Path -LiteralPath (Join-Path $Links 'OfflineKeyVault-Test.lnk')){throw 'Shortcut remains'}
+    if((Digest $vault) -ne $beforeVault){throw 'Vault changed'}
+    if((Digest $settings) -ne $beforeSettings){throw 'Settings changed'}
+    $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($registry+'\'+$name)
+    if($null -ne $key){$key.Dispose();throw 'Registration remains'}
+    Write-Output 'Uninstall registration, program removal and data preservation verified'
+} finally {[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($registry,$false)}
+''', encoding='utf-8')
+    print('Testing shipped uninstaller and isolated Windows registration...', flush=True)
+    run_checked(['powershell.exe', '-NoProfile', '-File', uninstall_check, installed, work / 'shortcut-test'], cwd=work)
     target = publish_artifact(output, ROOT / 'dist')
     sidecar = target.with_suffix('.exe.sha256')
     if sidecar.exists(): checked(sidecar)
@@ -81,8 +124,9 @@ def main():
               'embedded_icons_verified': True, 'shortcut_icon_verified': True,
               'in_place_upgrade_verified': True, 'user_data_preserved': True, 'shortcut_update_verified': True,
               'test_mode_existing_refused': True,
+              'uninstall_registered': True, 'uninstall_verified': True, 'uninstall_preserves_user_data': True,
               'unrelated_folder_preserved': True, 'real_desktop_untouched': True,
-              'sources': {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs')},
+              'sources': {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs')},
               'artifact': target.name, 'sha256': digest(target)}
     (work / 'verification.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(json.dumps(report), flush=True)

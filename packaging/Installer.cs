@@ -388,6 +388,7 @@ internal static partial class Installer {
                 install.Enabled=false;path.Enabled=false;browse.Enabled=false;desktop.Enabled=false;menu.Enabled=false;cancel.Enabled=false;
                 status.Text="正在验证与安装 / 升级，请稍候…";form.Refresh();
                 destination=Extract(path.Text,false);
+                RegisterInstallation(destination);
                 var issues=new List<string>();
                 UpdateExistingShortcuts(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),destination,issues);
                 UpdateExistingShortcuts(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"OfflineKeyVault"),destination,issues);

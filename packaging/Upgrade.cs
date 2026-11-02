@@ -12,7 +12,7 @@ using Microsoft.Win32.SafeHandles;
 internal static partial class Installer {
     const string UpgradeJournal=".offline-key-vault-upgrade";
     static readonly HashSet<string> ComponentNames=new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
-        "app","runtime","licenses","OfflineKeyVault.exe","manifest.sha256","build-info.json",
+        "app","runtime","licenses","OfflineKeyVault.exe","Uninstall.exe","manifest.sha256","build-info.json",
         "README.md","README.zh-CN.md","CONTRIBUTING.md","MACOS.md","COMPATIBILITY.md",
         "SECURITY_RECOVERY.md","requirements.txt","LICENSE","SECURITY.md","THIRD_PARTY_NOTICES.md",
         "RELEASING.md","launch.cmd","self-test.cmd","verify.cmd","START-HERE.txt"
