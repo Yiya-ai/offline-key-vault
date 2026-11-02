@@ -51,6 +51,14 @@ internal static partial class Installer {
                 File.WriteAllText(path,"synthetic user data "+relative);data[path]=FileDigest(path);
             }
             string preserved=Path.Combine(installed,"README.md");
+            DataApproval approved=null;string selected=Path.Combine(installed,"vaults/personal.okv");
+            if(mode=="delete-selected"||mode.StartsWith("data-")) {
+                File.WriteAllText(selected,"{\"format\":\"OKV2\",\"fixture\":\"synthetic\"}");
+                approved=ApproveDataDeletion(new[]{InspectData(selected)},"删除");
+                if(mode=="data-changed")File.AppendAllText(selected," ");
+                if(mode=="data-locked")blocked=new FileStream(selected+".lock",FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.ReadWrite);
+                data[selected]=FileDigest(selected);
+            }
             if(mode=="modified") {File.AppendAllText(preserved," user notes");data[preserved]=FileDigest(preserved);}
             if(mode=="missing")File.Delete(Path.Combine(installed,"app","launch.py"));
             if(mode=="manifest")File.AppendAllText(Path.Combine(installed,"manifest.sha256"),"invalid\n");
@@ -68,11 +76,17 @@ internal static partial class Installer {
                 using(var process=Process.Start(new ProcessStartInfo("powershell.exe","-NoProfile -File \""+Path.Combine(folder,"Junction.ps1")+"\" \""+runtime+"\" \""+outside+"\""){UseShellExecute=false,CreateNoWindow=true})) {process.WaitForExit();AssertUninstall(process.ExitCode==0);}
             }
             bool rejected=false;
-            try {RemoveInstallation(installed,expected,self,registry,new[]{links});}catch(IOException){rejected=true;}
+            try {
+                if(approved==null)RemoveInstallation(installed,expected,self,registry,new[]{links});
+                else RemoveInstallationWithData(installed,expected,self,registry,new[]{links},approved);
+            }catch(IOException){rejected=true;}
             if(mode=="junction") {AssertUninstall((File.GetAttributes(runtime)&FileAttributes.ReparsePoint)!=0);Directory.Delete(runtime,false);Directory.Move(outside,runtime);}
-            bool shouldReject=Array.IndexOf(new[]{"manifest","receipt","binding","self","journal","locked","metadata-locked","junction"},mode)>=0;
+            bool shouldReject=Array.IndexOf(new[]{"manifest","receipt","binding","self","journal","locked","metadata-locked","junction","data-changed","data-locked"},mode)>=0;
             AssertUninstall(rejected==shouldReject);
-            foreach(var pair in data)AssertUninstall(FileDigest(pair.Key)==pair.Value);
+            foreach(var pair in data) {
+                if(mode=="delete-selected"&&pair.Key==selected)AssertUninstall(!File.Exists(selected));
+                else AssertUninstall(FileDigest(pair.Key)==pair.Value);
+            }
             AssertUninstall(File.Exists(Path.Combine(links,"Synthetic unrelated shortcut.lnk")));
             AssertUninstall(File.Exists(Path.Combine(installed,"Uninstall.exe"))==shouldReject);
             AssertUninstall(File.Exists(Path.Combine(links,"Synthetic matching shortcut.lnk"))==shouldReject);
@@ -98,9 +112,9 @@ def compiled(tmp_path_factory):
     harness.write_text(HARNESS, encoding='utf-8')
     dll = work / 'Tests.dll'
     compiler = Path(os.environ['SystemRoot']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-    result = subprocess.run([str(compiler), '/nologo', '/target:library', '/r:System.Windows.Forms.dll',
+    result = subprocess.run([str(compiler), '/nologo', '/target:library', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll',
                              '/r:System.Drawing.dll', '/r:System.IO.Compression.dll', '/out:' + str(dll),
-                             *(str(ROOT / 'packaging' / name) for name in ('Installer.cs', 'Upgrade.cs', 'Uninstall.cs')),
+                             *(str(ROOT / 'packaging' / name) for name in ('Installer.cs', 'Upgrade.cs', 'Uninstall.cs', 'UninstallData.cs')),
                              str(harness)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     script = work / 'Run.ps1'
@@ -108,7 +122,7 @@ def compiled(tmp_path_factory):
     return dll, script
 
 
-@pytest.mark.parametrize('mode', ['success', 'modified', 'missing', 'manifest', 'receipt', 'binding', 'self', 'journal', 'locked', 'metadata-locked', 'registration-other', 'junction'])
+@pytest.mark.parametrize('mode', ['success', 'modified', 'missing', 'manifest', 'receipt', 'binding', 'self', 'journal', 'locked', 'metadata-locked', 'registration-other', 'junction', 'delete-selected', 'data-changed', 'data-locked'])
 def test_uninstall_preserves_personal_data_and_unrelated_registration(compiled, tmp_path, mode):
     dll, script = compiled
     if mode == 'junction':

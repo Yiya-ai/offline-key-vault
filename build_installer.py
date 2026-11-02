@@ -42,7 +42,7 @@ def main():
         info = json.loads(z.read('OfflineKeyVault/build-info.json'))
         if info.get('launcher_source_sha256') != digest(ROOT / 'packaging/Launcher.cs'):
             raise SystemExit('Rebuild the portable ZIP: launcher source changed.')
-        if info.get('uninstaller_sources') != {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs')}:
+        if info.get('uninstaller_sources') != {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs', 'packaging/UninstallData.cs')}:
             raise SystemExit('Rebuild the portable ZIP: uninstaller source changed.')
         if info.get('profile') != 'standard' or 'pykcs11' in info.get('packages', {}):
             raise SystemExit('Public installer requires a freshly verified standard portable build without PyKCS11.')
@@ -63,8 +63,8 @@ def main():
     icon = work / 'OfflineKeyVault.ico'
     write_ico(icon)
     run_checked([compiler, '/nologo', '/target:winexe', '/main:Installer', '/platform:x64', '/optimize+', '/win32icon:' + str(icon),
-                 '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
-                 '/resource:' + str(archive) + ',payload.zip', '/out:' + str(output), ROOT / 'packaging/Installer.cs', ROOT / 'packaging/Upgrade.cs', ROOT / 'packaging/Uninstall.cs'])
+                 '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
+                 '/resource:' + str(archive) + ',payload.zip', '/out:' + str(output), ROOT / 'packaging/Installer.cs', ROOT / 'packaging/Upgrade.cs', ROOT / 'packaging/Uninstall.cs', ROOT / 'packaging/UninstallData.cs'])
     verify_executable_icon(output)
     installed = work / '安装 验证'
     print('Testing actual install, in-place upgrade, data preservation and shortcut updates...', flush=True)
@@ -78,7 +78,7 @@ def main():
     # Load the shipped uninstaller from bytes so the real file can be removed.
     # Registration is tested in a unique namespace, never the user's app list.
     uninstall_check = work / 'UninstallAcceptance.ps1'
-    uninstall_check.write_text(r'''param($Folder,$Links)
+    uninstall_check.write_text(r'''param($Folder,$Links,$Mode='keep')
 $ErrorActionPreference='Stop'
 $registry='Software\OfflineKeyVaultTests\Installer-'+[guid]::NewGuid().ToString('N')
 $assembly=[Reflection.Assembly]::Load([IO.File]::ReadAllBytes((Join-Path $Folder 'Uninstall.exe')))
@@ -90,6 +90,7 @@ function Digest($Path) {
 }
 $vault=Join-Path $Folder 'vaults\synthetic.okv'
 $settings=Join-Path $Folder '.offline-key-vault-preferences.json'
+if($Mode -eq 'delete') {[IO.File]::WriteAllText($vault,'{"format":"OKV2","fixture":"synthetic acceptance data"}')}
 $beforeVault=Digest $vault
 $beforeSettings=Digest $settings
 try {
@@ -103,19 +104,35 @@ try {
     $self=Digest (Join-Path $Folder 'Uninstall.exe')
     $parameters=New-Object object[] 5
     $parameters[0]=$Folder; $parameters[1]=$expected; $parameters[2]=$self; $parameters[3]=$registry; $parameters[4]=[string[]]@($Links)
-    $null=$type.GetMethod('RemoveInstallation',$flags).Invoke($null,$parameters)
+    if($Mode -eq 'delete') {
+        $inspectArgs=New-Object object[] 1;$inspectArgs[0]=$vault.PSObject.BaseObject
+        $snapshot=$type.GetMethod('InspectData',$flags).Invoke($null,$inspectArgs)
+        $selected=[Array]::CreateInstance($snapshot.GetType(),1);$selected.SetValue($snapshot.PSObject.BaseObject,0)
+        $approvalArgs=New-Object object[] 2;$approvalArgs[0]=$selected.PSObject.BaseObject;$approvalArgs[1]='删除'
+        $approval=$type.GetMethod('ApproveDataDeletion',$flags).Invoke($null,$approvalArgs)
+        $withData=New-Object object[] 6;[Array]::Copy($parameters,$withData,5);$withData[5]=$approval.PSObject.BaseObject
+        $null=$type.GetMethod('RemoveInstallationWithData',$flags).Invoke($null,$withData)
+    } else {$null=$type.GetMethod('RemoveInstallation',$flags).Invoke($null,$parameters)}
     if(Test-Path -LiteralPath (Join-Path $Folder 'OfflineKeyVault.exe')){throw 'Launcher remains'}
     if(Test-Path -LiteralPath (Join-Path $Folder 'Uninstall.exe')){throw 'Uninstaller remains'}
     if(Test-Path -LiteralPath (Join-Path $Links 'OfflineKeyVault-Test.lnk')){throw 'Shortcut remains'}
-    if((Digest $vault) -ne $beforeVault){throw 'Vault changed'}
+    if($Mode -eq 'delete') {if(Test-Path -LiteralPath $vault){throw 'Explicitly selected vault remains'}}
+    elseif((Digest $vault) -ne $beforeVault){throw 'Vault changed'}
     if((Digest $settings) -ne $beforeSettings){throw 'Settings changed'}
     $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($registry+'\'+$name)
     if($null -ne $key){$key.Dispose();throw 'Registration remains'}
     Write-Output 'Uninstall registration, program removal and data preservation verified'
 } finally {[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($registry,$false)}
-''', encoding='utf-8')
+''', encoding='utf-8-sig')
     print('Testing shipped uninstaller and isolated Windows registration...', flush=True)
     run_checked(['powershell.exe', '-NoProfile', '-File', uninstall_check, installed, work / 'shortcut-test'], cwd=work)
+    delete_work = work / 'selected-data-test'
+    delete_work.mkdir()
+    delete_installed = delete_work / 'installed'
+    run_checked([output, '--test-install', delete_installed], cwd=work)
+    print('Testing explicit selected-data removal with the shipped uninstaller...', flush=True)
+    run_checked(['powershell.exe', '-NoProfile', '-File', uninstall_check, delete_installed,
+                 delete_work / 'shortcut-test', 'delete'], cwd=work)
     target = publish_artifact(output, ROOT / 'dist')
     sidecar = target.with_suffix('.exe.sha256')
     if sidecar.exists(): checked(sidecar)
@@ -125,8 +142,9 @@ try {
               'in_place_upgrade_verified': True, 'user_data_preserved': True, 'shortcut_update_verified': True,
               'test_mode_existing_refused': True,
               'uninstall_registered': True, 'uninstall_verified': True, 'uninstall_preserves_user_data': True,
+              'uninstall_selected_data_deleted': True, 'uninstall_unselected_settings_preserved': True,
               'unrelated_folder_preserved': True, 'real_desktop_untouched': True,
-              'sources': {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs')},
+              'sources': {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs', 'packaging/UninstallData.cs')},
               'artifact': target.name, 'sha256': digest(target)}
     (work / 'verification.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(json.dumps(report), flush=True)

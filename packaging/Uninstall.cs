@@ -9,7 +9,7 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 internal static partial class Installer {
-    internal const string ProductVersion="0.2.5";
+    internal const string ProductVersion="0.2.6";
     const string ProgramManifestHash="__PROGRAM_MANIFEST_SHA256__";
     const string InstallReceipt=".offline-key-vault-install.txt";
     internal const string UninstallRegistry=@"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -86,7 +86,11 @@ internal static partial class Installer {
     // Delete individual, hash-matching program files only. Never recursively
     // delete the installation directory or follow user data/default-path settings.
     internal static List<string> RemoveInstallation(string folder,string expectedManifest,string selfHash,string registryRoot,string[] shortcutFolders) {
+        return RemoveInstallationWithData(folder,expectedManifest,selfHash,registryRoot,shortcutFolders,null);
+    }
+    internal static List<string> RemoveInstallationWithData(string folder,string expectedManifest,string selfHash,string registryRoot,string[] shortcutFolders,DataApproval approval) {
         folder=CheckLocal(folder);
+        DataBatch data=null;
         var notes=new List<string>();var handles=new List<FileStream>();
         var directories=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var gate=InstallationGate(folder);var pins=new List<Microsoft.Win32.SafeHandles.SafeFileHandle>();
@@ -115,16 +119,21 @@ internal static partial class Installer {
             }
             string uninstaller=Path.Combine(folder,"Uninstall.exe");
             if(!remove.Contains(uninstaller))throw new IOException("卸载程序已被修改，请先修复安装。");
+            // Review and lock every selected data file before touching the app.
+            // Default preservation never discovers or opens personal data.
+            if(approval!=null)data=new DataBatch(approval);
             // Keep the entry point, manifest and receipt available until the
             // program-file pass succeeds, so a partial failure can be retried.
             remove.Remove(uninstaller);
             foreach(string path in remove){Plain(path);File.Delete(path);}
+            if(data!=null)data.DeleteConfirmed();
             foreach(string shortcuts in shortcutFolders)RemoveShortcuts(shortcuts,folder,notes);
             RemoveRegistration(folder,registryRoot);
             Plain(uninstaller);File.Delete(uninstaller);
             Plain(Path.Combine(folder,"manifest.sha256"));File.Delete(Path.Combine(folder,"manifest.sha256"));
             Plain(Path.Combine(folder,InstallReceipt));File.Delete(Path.Combine(folder,InstallReceipt));
         } finally {
+            if(data!=null)data.Dispose();
             foreach(var handle in handles)handle.Dispose();foreach(var pin in pins)pin.Dispose();gate.ReleaseMutex();gate.Dispose();
         }
         var ordered=new List<string>(directories);ordered.Sort((a,b)=>b.Length.CompareTo(a.Length));ordered.Add(folder);
@@ -152,10 +161,11 @@ internal static partial class Installer {
             string destination=CheckLocal(args[1]);
             try {using(var process=Process.GetProcessById(parent))if(!process.WaitForExit(15000))throw new IOException("请先关闭旧的卸载窗口后重试。");}catch(ArgumentException){}
             string hash=FileDigest(current);RemovalPlan(destination,ProgramManifestHash,hash);
-            if(MessageBox.Show("卸载离线密钥柜？\n\n将移除程序和指向此安装的快捷方式。\n保留所有密钥库、恢复文件、导出文件、设置与升级备份。\n\n安装位置："+destination,"卸载离线密钥柜",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return 0;
-            var notes=RemoveInstallation(destination,ProgramManifestHash,hash,UninstallRegistry,new[]{Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"OfflineKeyVault")});
-            MessageBox.Show("卸载完成。密钥库和设置未删除。"+(Directory.Exists(destination)?"\n保留文件的目录："+destination:"")+(notes.Count>0?"\n"+String.Join("\n",notes.ToArray()):""),"离线密钥柜",MessageBoxButtons.OK,MessageBoxIcon.Information);return 0;
-        } catch(Exception error) {MessageBox.Show("卸载未完成，个人数据未删除。\n"+error.Message,"离线密钥柜",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
+            DataApproval approval=null;
+            using(var options=CreateUninstallOptions(destination,owner=>ReviewData(owner,destination),value=>approval=value))if(options.ShowDialog()!=DialogResult.OK)return 0;
+            var notes=RemoveInstallationWithData(destination,ProgramManifestHash,hash,UninstallRegistry,new[]{Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"OfflineKeyVault")},approval);
+            MessageBox.Show((approval==null?"卸载完成。密钥库和设置未删除。":"卸载完成。已删除明确勾选并确认的 "+approval.Files.Length+" 个数据文件。其余文件保留。")+(Directory.Exists(destination)?"\n保留文件的目录："+destination:"")+(notes.Count>0?"\n"+String.Join("\n",notes.ToArray()):""),"离线密钥柜",MessageBoxButtons.OK,MessageBoxIcon.Information);return 0;
+        } catch(Exception error) {MessageBox.Show("卸载未完成。若已开始清理，请核对所选文件；未选择的数据不会主动删除。\n"+error.Message,"离线密钥柜",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
     }
 }
 internal static class UninstallEntry {

@@ -178,8 +178,8 @@ def compiled_installer(tmp_path_factory):
     dll = work / 'InstallerTests.dll'
     compiler = Path(os.environ['SystemRoot']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     subprocess.run([str(compiler), '/nologo', '/target:library',
-                    '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
-                    '/out:' + str(dll), str(ROOT / 'packaging/Installer.cs'), str(ROOT / 'packaging/Upgrade.cs'), str(ROOT / 'packaging/Uninstall.cs'), str(harness)], check=True, capture_output=True)
+                    '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
+                    '/out:' + str(dll), str(ROOT / 'packaging/Installer.cs'), str(ROOT / 'packaging/Upgrade.cs'), str(ROOT / 'packaging/Uninstall.cs'), str(ROOT / 'packaging/UninstallData.cs'), str(harness)], check=True, capture_output=True)
     script = work / 'Run.ps1'
     script.write_text("param($Assembly,$Mode,$Folder)\n$ErrorActionPreference='Stop'\nAdd-Type -Path $Assembly\n[InstallerIOTests]::Run($Mode,$Folder)\n", encoding='utf-8')
     return dll, script

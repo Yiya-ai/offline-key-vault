@@ -222,7 +222,7 @@ def main():
         '严格物理离线需求请在断网设备运行；详情及格式限制见 README.md。\n', encoding='utf-8-sig')
     build_info = {'platform': 'windows-x64', 'python': platform.python_version(), 'packages': runtime_packages,
                   'launcher_source_sha256': digest(ROOT / 'packaging/Launcher.cs'),
-                  'uninstaller_sources': {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs')},
+                  'uninstaller_sources': {name: digest(ROOT / name) for name in ('packaging/Installer.cs', 'packaging/Upgrade.cs', 'packaging/Uninstall.cs', 'packaging/UninstallData.cs')},
                   'profile': 'local-pkcs11' if options.with_pkcs11 else 'standard',
                   'build': 'local-files-only', 'source_files': list(APP_FILES)}
     (bundle / 'build-info.json').write_text(json.dumps(build_info, indent=2) + '\n', encoding='utf-8')
@@ -239,8 +239,8 @@ def main():
     uninstaller_source.write_text(uninstall_template.replace('__PROGRAM_MANIFEST_SHA256__', digest(manifest)), encoding='utf-8')
     uninstaller = bundle / 'Uninstall.exe'
     run_checked([compiler, '/nologo', '/target:winexe', '/main:UninstallEntry', '/platform:x64', '/optimize+',
-                 '/win32icon:' + str(icon), '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
-                 '/out:' + str(uninstaller), ROOT / 'packaging/Installer.cs', ROOT / 'packaging/Upgrade.cs', uninstaller_source])
+                 '/win32icon:' + str(icon), '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Drawing.dll', '/r:System.IO.Compression.dll',
+                 '/out:' + str(uninstaller), ROOT / 'packaging/Installer.cs', ROOT / 'packaging/Upgrade.cs', ROOT / 'packaging/UninstallData.cs', uninstaller_source])
     verify_executable_icon(uninstaller)
     files.append(uninstaller)
     manifest.write_text(manifest.read_text(encoding='utf-8') + digest(uninstaller) + '  Uninstall.exe\n', encoding='utf-8', newline='\n')

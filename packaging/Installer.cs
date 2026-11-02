@@ -37,11 +37,17 @@ internal static partial class Installer {
         DriveInfo drive = new DriveInfo(anchor);
         if (drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Removable)
             throw new IOException("仅允许本地固定磁盘或移动磁盘。");
-        for (string item = full; !String.IsNullOrEmpty(item); item = Path.GetDirectoryName(item)) {
-            if (Directory.Exists(item) || File.Exists(item)) {
-                if ((File.GetAttributes(item) & FileAttributes.ReparsePoint) != 0) throw new IOException("不允许链接或重解析点路径。");
-                if (!Directory.Exists(item)) throw new IOException("路径组件不是目录。");
-            }
+        // Check ancestors first, before probing any descendant that could
+        // traverse a junction to another disk or a network location.
+        var ancestors=new List<string>();
+        for(string item=full;!String.IsNullOrEmpty(item);item=Path.GetDirectoryName(item))ancestors.Add(item);
+        ancestors.Reverse();
+        foreach(string item in ancestors) {
+            FileAttributes attributes;
+            try {attributes=File.GetAttributes(item);}
+            catch(FileNotFoundException){continue;}catch(DirectoryNotFoundException){continue;}
+            if((attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("不允许链接或重解析点路径。");
+            if((attributes&FileAttributes.Directory)==0)throw new IOException("路径组件不是目录。");
         }
         return full;
     }
