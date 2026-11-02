@@ -18,7 +18,7 @@ using System.Security.Cryptography;
 internal static partial class Installer {
     static void Fixture(string folder,string version) {
         Directory.CreateDirectory(folder);var manifest=new StringBuilder();
-        foreach(string name in new[]{"app/launch.py","runtime/python.exe","runtime/pythonw.exe","runtime/python312._pth","build-info.json",version=="old"?"SECURITY.md":"CONTRIBUTING.md"}) {
+        foreach(string name in new[]{"app/launch.py","runtime/python.exe","runtime/pythonw.exe","runtime/python312._pth","runtime/Lib/legacy.py","build-info.json",version=="old"?"SECURITY.md":"CONTRIBUTING.md"}) {
             string path=Path.Combine(folder,name);Directory.CreateDirectory(Path.GetDirectoryName(path));
             File.WriteAllText(path,version+" "+name);manifest.Append(FileDigest(path)+"  "+name+"\n");
         }
@@ -63,6 +63,14 @@ internal static partial class Installer {
         Fixture(dest,"old");Fixture(stage,"new");
         Directory.CreateDirectory(Path.Combine(dest,"vaults"));File.WriteAllText(Path.Combine(dest,"vaults","sample.okv"),"synthetic vault bytes");
         File.WriteAllText(Path.Combine(dest,".offline-key-vault-preferences.json"),"synthetic preferences");
+        string cache=null,cacheHash=null;
+        if(mode.StartsWith("cache-")) {
+            string relative=mode=="cache-outside"?"app/__pycache__/launch.cpython-312.pyc":mode=="cache-orphan"?"runtime/Lib/__pycache__/unknown.cpython-312.pyc":mode=="cache-optimized"?"runtime/Lib/__pycache__/legacy.cpython-312.opt-1.pyc":"runtime/Lib/__pycache__/legacy.cpython-312.pyc";
+            cache=Path.Combine(mode=="cache-stage"?stage:dest,relative);Directory.CreateDirectory(Path.GetDirectoryName(cache));
+            using(var writer=new BinaryWriter(File.Create(cache))) {writer.Write(mode=="cache-header"?0u:0x0a0d0dcbu);writer.Write(mode=="cache-flags"?2u:0u);writer.Write(0UL);writer.Write(42);}
+            if(mode=="cache-large")using(var file=File.OpenWrite(cache))file.SetLength(16*1024*1024+1);
+            cacheHash=FileDigest(cache);
+        }
         if(mode=="journal-invalid") {
             File.WriteAllText(Path.Combine(dest,UpgradeJournal),"OKV-UPGRADE1\n"+Guid.NewGuid().ToString("N")+"\n11 ../vaults\n");
             bool denied=false;try{RecoverUpgrade(dest);}catch(IOException){denied=true;}Assert(denied);
@@ -81,7 +89,7 @@ internal static partial class Installer {
         var clock=Stopwatch.StartNew();
         bool failed=false;
         try {
-            ApplyUpgrade(dest,stage,p=>{Assert(File.ReadAllText(Path.Combine(p,"OfflineKeyVault.exe"))=="new");if(mode=="verify-fail")throw new IOException("synthetic validation failure");},n=>{
+            ApplyUpgrade(dest,stage,p=>{Assert(File.ReadAllText(Path.Combine(p,"OfflineKeyVault.exe"))=="new");if(mode=="verify-fail"||mode=="cache-rollback")throw new IOException("synthetic validation failure");},n=>{
                 if(mode=="move-fail"&&n==3)throw new IOException("synthetic rename failure");
                 if(mode.StartsWith("crash-")&&n==Int32.Parse(mode.Substring(6)))Environment.Exit(73);
             });
@@ -89,7 +97,16 @@ internal static partial class Installer {
         finally {if(unlock!=null)unlock.Dispose();if(blocked!=null)blocked.Dispose();}
         if(mode=="transient-rename")Assert(clock.ElapsedMilliseconds>=400);
         if(mode=="blocked-rename")Assert(clock.ElapsedMilliseconds<8000);
-        Assert(failed==(mode!="success"&&mode!="transient-rename"));
+        Assert(failed==(mode!="success"&&mode!="transient-rename"&&mode!="cache-old"&&mode!="cache-optimized"));
+        if(cache!=null) {
+            if(failed)Assert(FileDigest(cache)==cacheHash);
+            else {
+                Assert(Directory.GetFiles(Path.Combine(dest,"runtime"),"*.pyc",SearchOption.AllDirectories).Length==0);
+                var backups=Directory.GetDirectories(folder,".offline-key-vault-upgrade-*");Assert(backups.Length==1);
+                var caches=Directory.GetFiles(Path.Combine(backups[0],"old","runtime"),"*.pyc",SearchOption.AllDirectories);
+                Assert(caches.Length==1&&FileDigest(caches[0])==cacheHash);
+            }
+        }
         Assert(File.ReadAllText(Path.Combine(dest,"OfflineKeyVault.exe"))==(failed?"old":"new"));
         Assert(!File.Exists(Path.Combine(dest,UpgradeJournal)));
         Assert(File.ReadAllText(Path.Combine(dest,"vaults","sample.okv"))=="synthetic vault bytes");
@@ -130,7 +147,7 @@ def invoke(compiled, mode, folder):
                            str(folder)], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
 
 
-@pytest.mark.parametrize('mode', ['success', 'verify-fail', 'move-fail', 'transient-rename', 'blocked-rename', 'tampered', 'extra', 'collision', 'traversal', 'journal-invalid', 'guard-running', 'guard-launch', 'shortcut-update', 'shortcut-unrelated', 'test-mode-existing', 'test-mode-shortcut', 'test-mode-unrelated'])
+@pytest.mark.parametrize('mode', ['success', 'verify-fail', 'move-fail', 'transient-rename', 'blocked-rename', 'tampered', 'extra', 'collision', 'traversal', 'journal-invalid', 'guard-running', 'guard-launch', 'shortcut-update', 'shortcut-unrelated', 'test-mode-existing', 'test-mode-shortcut', 'test-mode-unrelated', 'cache-old', 'cache-optimized', 'cache-rollback', 'cache-stage', 'cache-orphan', 'cache-header', 'cache-flags', 'cache-outside', 'cache-large'])
 def test_upgrade_transaction(compiled, tmp_path, mode):
     if mode.startswith('guard-'):
         import shutil

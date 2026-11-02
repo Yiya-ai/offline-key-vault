@@ -70,7 +70,7 @@ internal static partial class Installer {
             return streams;
         } catch {foreach(var stream in streams)stream.Dispose();throw new IOException("程序可能仍在运行，或文件不可写。请关闭密钥柜及其自检窗口后重试；不会强制结束进程。");}
     }
-    static HashSet<string> ManagedComponents(string folder) {
+    static HashSet<string> ManagedComponents(string folder,bool allowLegacyCaches=false) {
         string manifest=Path.Combine(folder,"manifest.sha256");Plain(manifest);
         if(new FileInfo(manifest).Length>4*1024*1024)throw new IOException("程序清单过大。");
         var files=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -83,20 +83,43 @@ internal static partial class Installer {
             components.Add(top);
         }
         foreach(string required in new[]{"app/launch.py","runtime/python.exe","runtime/pythonw.exe","runtime/python312._pth","build-info.json"})if(!files.Contains(required))throw new IOException("这不是完整的密钥柜安装目录。");
-        // No user files may be swept into a program backup through a managed tree.
+        // Unlisted user files are refused. Legacy interpreter caches are allowed
+        // only in the old runtime and retained with the old program, never loaded
+        // or copied into the newly verified runtime.
         foreach(string component in components) {
             string path=Path.Combine(folder,component);Plain(path);
-            if(Directory.Exists(path))CheckManagedTree(path,folder,files);
+            if(Directory.Exists(path))CheckManagedTree(path,folder,files,allowLegacyCaches);
             else if(!File.Exists(path))throw new IOException("程序组件缺失。");
         }
         return components;
     }
-    static void CheckManagedTree(string directory,string root,HashSet<string> files) {
+    static bool IsLegacyCache(string path,string relative,HashSet<string> files) {
+        const string marker="/__pycache__/";
+        if(!relative.StartsWith("runtime/Lib/",StringComparison.OrdinalIgnoreCase))return false;
+        int split=relative.LastIndexOf(marker,StringComparison.OrdinalIgnoreCase);
+        if(split<0)return false;
+        string name=relative.Substring(split+marker.Length),source=null;
+        foreach(string suffix in new[]{".cpython-312.pyc",".cpython-312.opt-1.pyc",".cpython-312.opt-2.pyc"})
+            if(name.EndsWith(suffix,StringComparison.OrdinalIgnoreCase)) {source=relative.Substring(0,split)+"/"+name.Substring(0,name.Length-suffix.Length)+".py";break;}
+        if(source==null||!files.Contains(source))return false;
+        var info=new FileInfo(path);
+        if(info.Length<16||info.Length>16*1024*1024)return false;
+        // Check only the CPython 3.12 header. This is not code authentication;
+        // the cache remains untrusted and is never executed by the installer.
+        using(var reader=new BinaryReader(File.OpenRead(path))) {
+            uint magic=reader.ReadUInt32(),flags=reader.ReadUInt32();
+            return magic==0x0a0d0dcb && (flags==0||flags==1||flags==3);
+        }
+    }
+    static void CheckManagedTree(string directory,string root,HashSet<string> files,bool allowLegacyCaches) {
         CheckLocal(directory);
         foreach(string path in Directory.GetFileSystemEntries(directory)) {
             Plain(path);
-            if(Directory.Exists(path))CheckManagedTree(path,root,files);
-            else if(!files.Contains(path.Substring(root.Length+1).Replace('\\','/')))throw new IOException("程序内部目录含有额外文件，未覆盖。请将个人文件移出 app、runtime、licenses 后重试。");
+            if(Directory.Exists(path))CheckManagedTree(path,root,files,allowLegacyCaches);
+            else {
+                string relative=path.Substring(root.Length+1).Replace('\\','/');
+                if(!files.Contains(relative)&&!(allowLegacyCaches&&IsLegacyCache(path,relative,files)))throw new IOException("程序内部目录含有额外文件，未覆盖。请将个人文件移出 app、runtime、licenses 后重试。");
+            }
         }
     }
     static List<Component> ReadJournal(string destination,out string transaction) {
@@ -140,7 +163,7 @@ internal static partial class Installer {
         } finally {foreach(var g in guards)g.Dispose();foreach(var p in txPins)p.Dispose();foreach(var p in pins)p.Dispose();}
     }
     static void ApplyUpgrade(string destination,string stage,Action<string> verify,Action<int> checkpoint) {
-        var oldComponents=ManagedComponents(destination);var newComponents=ManagedComponents(stage);
+        var oldComponents=ManagedComponents(destination,true);var newComponents=ManagedComponents(stage);
         var names=new SortedSet<string>(oldComponents,StringComparer.OrdinalIgnoreCase);names.UnionWith(newComponents);
         var plan=new List<Component>();
         foreach(string name in names) {
