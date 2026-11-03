@@ -1,0 +1,1 @@
+{"name":"offline-key-vault-web","version":"0.1.0","private":true,"type":"module","scripts":{"build":"python build_web.py"},"devDependencies":{"pyodide":"314.0.7"},"dependencies":{"@noble/curves":"2.4.0","esbuild":"0.25.12","node-forge":"1.4.2"}}

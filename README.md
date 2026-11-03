@@ -8,6 +8,14 @@ The application has no upload, telemetry, online update or automatic dependency-
 
 ## Project status
 
+An optional [browser toolbox](web/README.md) provides session-only generation,
+conversion, key-pair checking and certificate/container tools. It has no vault
+or key-upload backend. Build and host it separately; it does not change the
+desktop application's offline behavior.
+The browser runtime uses a source-built cryptography 50.0.2 / OpenSSL 3.6.5 WASM
+wheel. The previously identified dependency release blocker is resolved; the
+advisory and integrity gates remain enabled. See its security report and build guide.
+
 Application icons are generated locally from the same artwork for Windows executables, shortcuts and windows, and for the macOS app bundle. Older installations need the updated package to receive these icons.
 
 | Component | Status |

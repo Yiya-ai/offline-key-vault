@@ -1,0 +1,68 @@
+async (page) => {
+  const rows=[];
+  const check=(name,ok)=>{rows.push({name,ok:!!ok});if(!ok)throw new Error(name);};
+  const backend=await page.evaluate(async()=>{
+    const rows=[], pass='Synthetic browser phrase 7314';
+    const send=message=>window.__command(message);
+    const check=(name,ok)=>{rows.push({name,ok:!!ok});};
+    await send({action:'generate',algorithm:'Ed25519'});
+    const pub=(await send({action:'export',id:0,private:false,format:'PEM'})).result;
+    const priv=(await send({action:'export',id:0,private:true,format:'OpenSSH',plaintext:true})).result;
+    const protectedKey=(await send({action:'export',id:0,private:true,format:'PEM',password:pass})).result;
+    check('default rejects plaintext private export',!(await send({action:'export',id:0,private:true,format:'PEM'})).ok);
+    check('private preview requires intent',!(await send({action:'preview',id:0,private:true})).ok);
+    check('wrong password is error',!(await send({action:'compare',publicData:pub.data,privateData:protectedKey.data,privatePassword:'wrong'})).ok);
+    check('matching keys', (await send({action:'compare',publicData:pub.data,privateData:protectedKey.data,privatePassword:pass})).result.matched);
+    check('reject private input as public',!(await send({action:'compare',publicData:priv.data,privateData:priv.data})).ok);
+    await send({action:'generate',algorithm:'Ed25519'});
+    const other=(await send({action:'export',id:0,private:false,format:'PEM'})).result;
+    check('different keys mismatch',(await send({action:'compare',publicData:other.data,privateData:priv.data})).result.matched===false);
+    await send({action:'inspect',data:pub.data});
+    check('public cannot export private',!(await send({action:'export',id:0,private:true,format:'PEM',plaintext:true})).ok);
+    const original=btoa(atob(priv.data).replace(/\n/g,'\r\n'));
+    await send({action:'inspect',data:original});
+    check('original private requires intent',!(await send({action:'export',id:0,format:'Original'})).ok);
+    check('original byte preservation',(await send({action:'export',id:0,format:'Original',plaintext:true})).result.data===original);
+    check('reject oversized input',!(await send({action:'inspect',data:btoa('a'.repeat(131073))})).ok);
+    check('failed import drops previous key',!(await send({action:'preview',id:0})).ok);
+    check('arbitrary commands refused',!(await send({action:'eval',code:'print(1)'})).ok);
+    check('network fetch blocked',await fetch('./security-probe').then(()=>false,()=>true));
+    check('no local/session storage',localStorage.length===0&&sessionStorage.length===0);
+    check('no cookies',document.cookie==='');
+    check('no IndexedDB databases',(await indexedDB.databases()).length===0);
+    check('no service workers',(await navigator.serviceWorker.getRegistrations()).length===0);
+    return rows;
+  });
+  rows.push(...backend);
+  check('backend gates all passed',backend.every(x=>x.ok));
+  await page.context().setOffline(true);
+  try {
+    await page.locator('#generate').click();
+    await page.waitForFunction(()=>document.querySelector('#preview').value.includes('BEGIN PUBLIC KEY'));
+    check('offline generation works',true);
+    check('private initially hidden',!(await page.locator('#preview').inputValue()).includes('PRIVATE'));
+    await page.locator('#toggle-private').click();
+    await page.waitForFunction(()=>document.querySelector('#preview').value.includes('BEGIN PRIVATE KEY'));
+    await page.locator('#toggle-private').click();
+    await page.waitForFunction(()=>document.querySelector('#preview').value.includes('BEGIN PUBLIC KEY'));
+    check('private eye reveals and hides',true);
+    await page.locator('#export-password').fill('Synthetic browser phrase 7314');
+    await page.locator('[data-password="export-password"]').click();
+    check('password eye shows',await page.locator('#export-password').getAttribute('type')==='text');
+    await page.locator('[data-password="export-password"]').click();
+    check('password eye hides',await page.locator('#export-password').getAttribute('type')==='password');
+    await page.locator('#output-name').fill('synthetic-download');
+    const downloadPromise=page.waitForEvent('download');
+    await page.locator('#export-private').click();
+    const download=await downloadPromise;
+    check('key name becomes filename',download.suggestedFilename()==='synthetic-download.pem');
+    await download.saveAs('output/playwright/synthetic-browser-encrypted.pem');
+    await page.locator('#clear-all').click();
+    await page.getByText('仅本地计算 · 网络已关闭',{exact:true}).waitFor({timeout:90000});
+    check('offline clear restarts engine',true);
+    check('clear removes all sensitive fields',await page.evaluate(()=>[...document.querySelectorAll('textarea,input[type=password],input[type=file]')].every(x=>!x.value)));
+    check('clear drops worker keys',await page.evaluate(async()=>!(await window.__command({action:'preview',id:0})).ok));
+  } finally {await page.context().setOffline(false);}
+  await page.evaluate(rows=>window.__security=rows,rows);
+  console.log(JSON.stringify(rows));
+}

@@ -15,9 +15,12 @@ ROOT = Path(__file__).absolute().parent.parent
 MANIFEST = 'tools/release_manifest.json'
 MAX_BYTES = 2 * 1024 * 1024
 PRIVATE_PARTS = frozenset({'.git', 'vendor', 'build', 'dist', 'exports', 'test-results',
-                           '__pycache__', '.pytest_cache', '.venv', 'venv', 'wheelhouse'})
+                           '__pycache__', '.pytest_cache', '.venv', 'venv', 'wheelhouse',
+                           'node_modules', '.vendor', '.playwright-cli', 'output'})
 SOURCE_SUFFIXES = frozenset({'.py', '.md', '.txt', '.cs', '.c', '.cmd', '.command', '.json', '.yml'})
-SPECIAL_NAMES = frozenset({'LICENSE', '.gitignore', '.gitattributes'})
+WEB_SOURCE_SUFFIXES = frozenset({'.js', '.mjs', '.html', '.css', '.svg'})
+SPECIAL_NAMES = frozenset({'LICENSE', '.gitignore', '.gitattributes',
+                          'web/wasm-build/Dockerfile', 'web/wasm-build/.dockerignore'})
 PATTERNS = (
     ('personal-home-path', re.compile(r'(?:[A-Za-z]:[\\/]+Users[\\/]+|/(?:Users|home)/)[A-Za-z0-9_.-]+')),
     ('credential-token', re.compile(r'(?:gh[pousr]_|github_pat_|sk-proj-)[A-Za-z0-9_-]{20,}')),
@@ -40,7 +43,9 @@ def validate_names(names):
         if (path.is_absolute() or path.as_posix() != name or '..' in path.parts
                 or any(part.lower() in PRIVATE_PARTS for part in path.parts)
                 or any(part.lower().startswith('.env') for part in path.parts)
-                or (path.suffix not in SOURCE_SUFFIXES and name not in SPECIAL_NAMES)):
+                or (path.suffix not in SOURCE_SUFFIXES and name not in SPECIAL_NAMES
+                    and not (path.parts[0] == 'web' and path.suffix in WEB_SOURCE_SUFFIXES)
+                    and not (path.parts[:2] == ('web', 'wasm-build') and path.suffix == '.sh'))):
             raise ReleaseError('Disallowed source manifest path')
         if name.casefold() in seen:
             raise ReleaseError('Duplicate source manifest path')

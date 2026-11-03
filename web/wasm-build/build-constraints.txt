@@ -1,0 +1,5 @@
+# Build backend inputs; target runtime cffi is separately locked in dependencies.lock.json.
+maturin==1.16.0
+cffi==2.0.0
+setuptools==84.2.1
+pycparser==3.0

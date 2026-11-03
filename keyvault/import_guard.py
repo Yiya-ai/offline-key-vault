@@ -48,8 +48,18 @@ def check_der(data, password=b''):
         _plain_der(_decrypt(info, password, budget))
     elif len(seq) >= 2 and isinstance(seq[0], core.Integer) and seq[0].native == 3 and isinstance(seq[1], core.Sequence):
         pfx = ap.Pfx.load(data, strict=True)
-        if pfx['mac_data'].native is not None:
-            _bounded(pfx['mac_data']['iterations'].native)
+        mac = pfx['mac_data']
+        if mac.native is None:
+            raise ValueError('PKCS#12 必须包含可验证的口令 MAC')
+        # Reject PBMAC1 before OpenSSL (CVE-2026-34181), and bound all MAC work.
+        sizes = {'sha1': 20, 'sha224': 28, 'sha256': 32, 'sha384': 48, 'sha512': 64}
+        digest_size = sizes.get(mac['mac']['digest_algorithm']['algorithm'].native)
+        if (not digest_size or len(mac['mac']['digest'].native) != digest_size
+                or mac['mac']['digest_algorithm']['parameters'].native is not None
+                or not 1 <= len(mac['mac_salt'].native) <= 1024):
+            raise ValueError('PKCS#12 MAC 算法或参数不支持')
+        _bounded(mac['iterations'].native)
+        budget[0] += mac['iterations'].native
         if pfx['auth_safe']['content_type'].native != 'data':
             raise ValueError('不支持签名式 PFX 容器')
         key_count = 0

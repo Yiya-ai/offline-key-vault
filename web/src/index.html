@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src blob:; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'">
+  <title>密钥工具箱 · 浏览器版</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" type="module"></script>
+</head>
+<body>
+  <svg class="icon-definitions" aria-hidden="true"><defs>
+    <symbol id="eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="key" viewBox="0 0 24 24"><circle cx="8" cy="8" r="5"/><path d="m12 12 9 9m-3-3 3-3m-6 0 3-3"/><circle cx="7" cy="7" r=".5"/></symbol>
+    <symbol id="convert" viewBox="0 0 24 24"><path d="M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4"/></symbol>
+    <symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6M5 21h14"/></symbol>
+    <symbol id="document" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8l-5-5v5h5M8 12h8M8 16h6"/></symbol>
+    <symbol id="shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  </defs></svg>
+  <aside class="sidebar">
+    <a class="brand" href="./" aria-label="密钥工具箱首页"><span class="brand-mark"><svg><use href="#key"/></svg></span><span>密钥工具箱<small>浏览器版</small></span></a>
+    <p class="nav-label">即用工具</p>
+    <nav aria-label="工具导航">
+      <button class="nav-item active" data-view="generate" aria-current="page"><svg><use href="#key"/></svg>生成密钥对</button>
+      <button class="nav-item" data-view="convert"><svg><use href="#convert"/></svg>文本 / 文件转换</button>
+      <button class="nav-item" data-view="compare"><svg><use href="#check"/></svg>公私钥校对</button>
+      <button class="nav-item" data-view="certificates"><svg><use href="#document"/></svg>证书与容器</button>
+    </nav>
+    <div class="sidebar-bottom"><button class="nav-item" data-view="help"><svg><use href="#shield"/></svg>格式与隐私说明</button><p><span class="dot"></span>不建库，不留历史</p><small>需要长期保存？<a href="https://github.com/Yiya-ai/offline-key-vault/releases" target="_blank" rel="noopener noreferrer">使用桌面版</a></small></div>
+  </aside>
+  <main>
+    <header class="topbar"><span id="engine-status" class="engine-status" role="status">准备浏览器引擎</span><button id="clear-all" class="button quiet"><svg><use href="#close"/></svg>立即清空</button></header>
+    <div class="page-heading"><h1 id="page-title">生成密钥对</h1><p id="page-description">选择算法，在当前浏览器生成。公钥与私钥来自同一密钥对。</p></div>
+    <div id="loading" class="notice"><span id="loading-text">正在加载公开程序资源。加载完成后关闭网络连接，再开放密钥输入。</span><progress id="load-progress" max="100" value="0" aria-label="引擎加载进度"></progress></div>
+    <div id="message" class="message" role="status" hidden></div>
+    <div id="workspace" class="workspace">
+      <section class="input-panel" aria-label="操作设置">
+        <fieldset id="tool-fields" disabled>
+          <div id="generate-panel" class="tool-panel">
+            <h2>生成设置</h2>
+            <label for="key-name">密钥名称</label><input id="key-name" maxlength="80" value="my-key" autocomplete="off" spellcheck="false"><p class="field-help">用作下载文件名；OpenPGP 也会将名称写入身份。</p>
+            <label for="algorithm">算法</label><select id="algorithm"><option>Ed25519</option><option>RSA-3072</option><option>RSA-4096</option><option>RSA-2048</option><option>ECDSA-P256</option><option>ECDSA-P384</option><option>ECDSA-P521</option><option>ECDSA-secp256k1</option><option>Ed448</option><option>X25519</option><option>X448</option><option>SM2</option><option>OpenPGP-RSA3072</option></select>
+            <p id="algorithm-hint" class="field-help">适合 SSH 等签名用途；不能直接用于数据加密。</p>
+            <button id="generate" class="button primary full">生成密钥对</button>
+            <div class="form-note"><svg><use href="#shield"/></svg><p>密钥仅在当前页面的内存中使用。请自行下载需要的文件，清空后不能找回。</p></div>
+          </div>
+          <div id="convert-panel" class="tool-panel" hidden>
+            <h2 id="input-title">读取密钥</h2>
+            <label for="input-text">密钥文本 / 证书</label><textarea id="input-text" rows="8" placeholder="粘贴完整 PEM、OpenSSH、JWK、PPK、PGP 或无头尾 Base64 DER…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="131072"></textarea>
+            <div class="file-row"><label class="button file-button" for="input-file">选择本地文件<input id="input-file" type="file" accept=".pem,.key,.pub,.der,.jwk,.ppk,.asc,.pgp,.gpg,.p12,.pfx,.jks,.crt,.cer,.p7b,.txt"></label><span id="input-file-name">未选择文件</span></div>
+            <p class="field-help">只在浏览器读取，最多 128 KiB；有文本时优先使用文本。</p>
+            <label for="raw-kind">输入格式</label><select id="raw-kind"><option value="">自动识别</option><option value="X25519-public">X25519 原始公钥</option><option value="X25519-private">X25519 原始私钥</option></select>
+            <label for="input-password">输入文件口令 <span class="optional">未加密可留空</span></label><div class="password-field"><input id="input-password" type="password" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" maxlength="1024"><button class="eye-button" data-password="input-password" aria-label="显示输入文件口令" aria-pressed="false"><svg><use href="#eye"/></svg></button></div>
+            <details><summary>JKS 独立条目口令</summary><label for="input-entry-password">条目口令</label><div class="password-field"><input id="input-entry-password" type="password" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" maxlength="1024"><button class="eye-button" data-password="input-entry-password" aria-label="显示条目口令" aria-pressed="false"><svg><use href="#eye"/></svg></button></div></details>
+            <button id="inspect" class="button primary full">校验并读取</button>
+          </div>
+        </fieldset>
+      </section>
+      <section class="result-panel" aria-labelledby="result-title">
+        <div class="section-heading"><h2 id="result-title">当前结果</h2><span id="result-kind" class="tag" hidden></span></div>
+        <div id="empty-result" class="empty-state"><svg><use href="#key"/></svg><h3>一对密钥，从这里开始</h3><p>完成生成或读取后，在这里查看公钥、<br>校验指纹并下载需要的格式。</p><span>不创建密钥库，也不保存操作历史</span></div>
+        <div id="key-result" hidden>
+          <label for="entry-select">当前条目</label><select id="entry-select"></select>
+          <dl class="fingerprint"><dt>公钥指纹</dt><dd id="fingerprint"></dd></dl>
+          <div class="preview-heading"><h3 id="preview-title">公钥内容</h3><button id="toggle-private" class="button small"><svg><use href="#eye"/></svg><span>显示私钥</span></button></div>
+          <textarea id="preview" class="key-preview" rows="7" readonly autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="密钥内容预览"></textarea>
+          <p id="preview-note" class="field-help">指纹用于识别密钥，不代表证书可信。</p>
+          <div class="export-section"><h3>下载文件</h3><label for="output-name">文件名称</label><input id="output-name" maxlength="80" value="my-key" autocomplete="off" spellcheck="false">
+            <div class="export-row"><label for="public-format">公钥 / 证书格式<select id="public-format"></select></label><button id="export-public" class="button">下载公钥</button></div>
+            <div id="private-export"><div class="export-row"><label for="private-format">私钥格式<select id="private-format"></select></label><button id="export-private" class="button primary">下载私钥</button></div>
+              <label for="export-password">导出口令 <span class="optional">至少 12 个字符</span></label><div class="password-field"><input id="export-password" type="password" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="new-password" maxlength="1024"><button class="eye-button" data-password="export-password" aria-label="显示导出口令" aria-pressed="false"><svg><use href="#eye"/></svg></button></div>
+              <label class="checkbox"><input id="allow-plain" type="checkbox">我明确允许导出未加密私钥</label>
+            </div>
+            <button id="export-original" class="button quiet full" hidden>原样下载输入内容</button><p id="export-hint" class="field-help">重新编码可能改变文本、注释或随机参数，但不会换成另一把密钥。需要逐字节一致时使用原样下载。</p>
+          </div>
+        </div>
+      </section>
+    </div>
+    <section id="compare-panel" hidden>
+      <fieldset id="compare-fields" disabled><div class="compare-grid">
+        <div class="compare-column"><h2>公钥</h2><label for="compare-public">公钥文本 / 证书</label><textarea id="compare-public" rows="8" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="131072" placeholder="粘贴公钥或证书"></textarea><label class="button file-button" for="compare-public-file">选择公钥文件<input id="compare-public-file" type="file"></label><span id="compare-public-name" class="file-caption"></span><label for="public-password">容器口令 <span class="optional">例如 JKS</span></label><div class="password-field"><input id="public-password" type="password" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" maxlength="1024"><button class="eye-button" data-password="public-password" aria-label="显示公钥容器口令" aria-pressed="false"><svg><use href="#eye"/></svg></button></div></div>
+        <div class="compare-column"><h2>私钥</h2><label for="compare-private">私钥文本</label><textarea id="compare-private" rows="8" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="131072" placeholder="粘贴对应的完整私钥"></textarea><label class="button file-button" for="compare-private-file">选择私钥文件<input id="compare-private-file" type="file"></label><span id="compare-private-name" class="file-caption"></span><label for="private-password">私钥口令</label><div class="password-field"><input id="private-password" type="password" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" maxlength="1024"><button class="eye-button" data-password="private-password" aria-label="显示私钥口令" aria-pressed="false"><svg><use href="#eye"/></svg></button></div><details><summary>JKS 独立条目口令</summary><label for="compare-entry-password">条目口令</label><div class="password-field"><input id="compare-entry-password" type="password" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" maxlength="1024"><button class="eye-button" data-password="compare-entry-password" aria-label="显示私钥条目口令" aria-pressed="false"><svg><use href="#eye"/></svg></button></div></details></div>
+      </div><div class="compare-actions"><label class="checkbox"><input id="compare-raw" type="checkbox">两侧均为 X25519 原始 Base64 密钥</label><button id="compare" class="button primary">校验是否匹配</button></div></fieldset>
+      <div id="compare-result" class="comparison-result" role="status" hidden></div>
+    </section>
+    <section id="help-panel" class="help-panel" hidden>
+      <h2>只处理这一次，不替你保管</h2><p>密钥、口令和操作结果仅在当前页面内存中使用。不使用 Cookie、localStorage、IndexedDB 或服务器数据库保存这些内容；不添加统计、遥测或错误上报。下载文件是你主动保存到设备的副本。</p>
+      <p>页面先加载同站点的程序和依赖，再禁止后续网络连接。网站托管方仍可能记录访问 IP 和静态资源请求；这不等于匿名访问。浏览器扩展、设备和网站所提供代码仍需可信。清空会终止计算线程并移除界面内容，但不能保证操作系统内存、浏览器交换区或剪贴板被物理擦除。</p>
+      <h2>算法与格式</h2><div class="table-scroll"><table><thead><tr><th>类别</th><th>支持范围</th></tr></thead><tbody>
+        <tr><td>生成</td><td>RSA 2048 / 3072 / 4096；ECDSA P-256 / P-384 / P-521 / secp256k1；Ed25519 / Ed448；X25519 / X448；SM2；OpenPGP RSA-3072。</td></tr>
+        <tr><td>密钥转换</td><td>PEM、DER、无头尾 Base64 DER、PKCS#1、SEC1、OpenSSH、JWK、PPK v2/v3、OpenPGP ASCII / 二进制、X25519 raw。</td></tr>
+        <tr><td>证书与容器</td><td>PKCS#12 / PFX、JKS 条目、X.509 证书 / 证书集合、SSH 证书和 P7B 导出。保留已读取的证书附件；不签发证书，不在线验证信任链或吊销状态。</td></tr>
+        <tr><td>旧格式</td><td>在资源限制内导入传统 PEM 加密头、PBES1、3DES、RC2、scrypt。导出时优先采用加密 PKCS#8。</td></tr>
+        <tr><td>不属于网页功能</td><td>密钥库、持久分类管理、库密码找回和自毁、任意默认磁盘路径、PKCS#11 本地驱动。硬件令牌请使用桌面版；网页不会上传驱动或设备私钥。</td></tr>
+      </tbody></table></div><p>算法与格式不能任意组合。每次输入最多 128 KiB；拒绝未知算法、DSA、RSA-1024 私钥、多私钥 PFX、OpenPGP v5/v6 以及超限 KDF。JKS 可选择条目分别导出。证书签名正确不等于可信。</p>
+      <p>SM2 的 PFX 支持限于不带证书的单密钥容器。JKS 和 PPK v2 的口令保护较弱，优先选择加密 PKCS#8 或 PPK v3。</p>
+      <h2>随时结束本次使用</h2><p>点击右上角“立即清空”，关闭或刷新页面，或空闲五分钟，都会清除本次工具状态。浏览器挂起可能延迟计时器，恢复前台和首次活动时会先检查过期。失焦时隐藏已显示的私钥和密码。浏览器的下载、剪贴板和你另存的文件不会随页面清空。</p>
+    </section>
+    <footer class="page-footer"><span><span class="dot"></span>密钥不上传</span><span>空闲 5 分钟自动清空</span><span>没有自动保存，请自行下载</span></footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!.dockerignore
+!sources.json
+!fetch_sources.py
+!build.sh
+!build-constraints.txt

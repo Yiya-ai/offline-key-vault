@@ -66,3 +66,11 @@ sessions/
 .DS_Store
 Thumbs.db
 Desktop.ini
+# Browser build dependencies, generated assets and local browser tests
+node_modules/
+web/.vendor/
+web/dist/
+web/probe.*
+web/probe-*
+.playwright-cli/
+output/

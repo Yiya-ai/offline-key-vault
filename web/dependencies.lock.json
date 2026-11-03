@@ -1,0 +1,107 @@
+{
+  "pyodide": "314.0.7",
+  "wasm_packages": [
+    "argon2-cffi",
+    "argon2-cffi-bindings",
+    "bcrypt",
+    "cffi",
+    "cryptography",
+    "pycparser",
+    "pycryptodome",
+    "six"
+  ],
+  "files": [
+    {
+      "name": "argon2-cffi",
+      "file": "argon2_cffi-23.1.0-py3-none-any.whl",
+      "sha256": "6dcfd114c94eab7e3feb4af995cc0a62db38972332667da93804b79f2eb28da5",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/argon2_cffi-23.1.0-py3-none-any.whl"
+    },
+    {
+      "name": "argon2-cffi-bindings",
+      "file": "argon2_cffi_bindings-25.1.0-cp314-abi3-pyemscripten_2026_0_wasm32.whl",
+      "sha256": "13b8766c50db38a25aed860a5800fd50b16c39c5d1f89a7682170aac6855c07d",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/argon2_cffi_bindings-25.1.0-cp314-abi3-pyemscripten_2026_0_wasm32.whl"
+    },
+    {
+      "name": "bcrypt",
+      "file": "bcrypt-5.0.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "sha256": "be8dd797737c16ca71c0bbc065a4f9bad2dae5a3f6943d9a4455a4eae195f528",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/bcrypt-5.0.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl"
+    },
+    {
+      "name": "cffi",
+      "file": "cffi-2.0.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "sha256": "9ae1a61096321cef7248e02293f42d000fa87b73a3e795705a2444290590459d",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/cffi-2.0.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl"
+    },
+    {
+      "name": "cryptography",
+      "version": "50.0.2",
+      "file": "cryptography-50.0.2-cp314-abi3-pyemscripten_2026_0_wasm32.whl",
+      "sha256": "ce1ef4e6f407cbfd7cae378d25ec07a272d1dc4b01578ac72482560d064ca806",
+      "build": "wasm-build/Dockerfile",
+      "openssl": "3.6.5"
+    },
+    {
+      "name": "pycparser",
+      "file": "pycparser-3.0-py3-none-any.whl",
+      "sha256": "0b4cbc12c42e25df55343342fb0da45b189181e4f360602f9721db2016fc3a4b",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pycparser-3.0-py3-none-any.whl"
+    },
+    {
+      "name": "pycryptodome",
+      "file": "pycryptodome-3.23.0-cp37-abi3-pyemscripten_2026_0_wasm32.whl",
+      "sha256": "67b86abb0de02dceebf422d10fc6e0e3754aea08626d1957e6fe69b75cbf644d",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pycryptodome-3.23.0-cp37-abi3-pyemscripten_2026_0_wasm32.whl"
+    },
+    {
+      "name": "six",
+      "file": "six-1.17.0-py2.py3-none-any.whl",
+      "sha256": "228c50f73aa7addf2c2ccf2979c256802a59ab69cad8152b31b9443cc8140f42",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/six-1.17.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "asn1crypto",
+      "file": "asn1crypto-1.5.1-py2.py3-none-any.whl",
+      "sha256": "db4e40728b728508912cbb3d44f19ce188f218e9eba635821bb4b68564f8fd67",
+      "url": "https://files.pythonhosted.org/packages/c9/7f/09065fd9e27da0eda08b4d6897f1c13535066174cc023af248fc2a8d5e5a/asn1crypto-1.5.1-py2.py3-none-any.whl"
+    },
+    {
+      "name": "pyjks",
+      "file": "pyjks-20.0.0-py2.py3-none-any.whl",
+      "sha256": "394dee142ecff6b1adc36f64356e5584732f1859575aa03b9cf5d5541a9e3460",
+      "url": "https://files.pythonhosted.org/packages/28/46/e1f2c679d9c6c76a5fda4eb99922a51141803089bf58e77c74a1fe6f9033/pyjks-20.0.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "javaobj-py3",
+      "file": "javaobj_py3-0.4.4-py2.py3-none-any.whl",
+      "sha256": "d7d676fe71825f6c17024df6791b80b7cc30ef40b61100f4ea3961af063f79b6",
+      "url": "https://files.pythonhosted.org/packages/68/5e/94afe8aaae8d5d1be025acb4810788e58318f7cde266eaba77fe5016a1a6/javaobj_py3-0.4.4-py2.py3-none-any.whl"
+    },
+    {
+      "name": "pyasn1",
+      "file": "pyasn1-0.6.5-py3-none-any.whl",
+      "sha256": "4017b0fce125096b8573b39c989fdb1a4b19cf761e683398184550fea0e66587",
+      "url": "https://files.pythonhosted.org/packages/19/1f/3eefd5c84c35cae44549ce1c7f7e58f7945b34f5a6bce07a135438522073/pyasn1-0.6.5-py3-none-any.whl"
+    },
+    {
+      "name": "pyasn1-modules",
+      "file": "pyasn1_modules-0.4.2-py3-none-any.whl",
+      "sha256": "29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a",
+      "url": "https://files.pythonhosted.org/packages/47/8d/d529b5d697919ba8c11ad626e835d4039be708a35b0d22de83a269a6682c/pyasn1_modules-0.4.2-py3-none-any.whl"
+    },
+    {
+      "name": "standard-imghdr",
+      "file": "standard_imghdr-3.13.0-py3-none-any.whl",
+      "sha256": "30a1bff5465605bb496f842a6ac3cc1f2131bf3025b0da28d4877d6d4b7cc8e9",
+      "url": "https://files.pythonhosted.org/packages/df/cb/e1da7e340586a078404c7e4328bfefc930867ace8a9a55916fd220cf9547/standard_imghdr-3.13.0-py3-none-any.whl"
+    },
+    {
+      "name": "PGPy",
+      "file": "PGPy-0.6.0.tar.gz",
+      "sha256": "279c2e353f4c3a319f00bd9bd582456e420f8a3ac6de2b4e9731444746828383",
+      "url": "https://files.pythonhosted.org/packages/f8/68/5e285ba9465550a48e837b08b27fa99ef238618f6085a1464afaa4dc8426/PGPy-0.6.0.tar.gz"
+    }
+  ]
+}

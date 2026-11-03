@@ -26,7 +26,10 @@ def test_source_archive_excludes_runtime_and_is_reproducible(tmp_path):
         assert archive.read('offline-key-vault/main.py') == (root / 'main.py').read_bytes()
 
 
-@pytest.mark.parametrize('name', ['../outside.py', '/outside.py', 'exports/leak.py', 'secrets.pem', '.env.txt', 'dir//x.py'])
+@pytest.mark.parametrize('name', ['../outside.py', '/outside.py', 'exports/leak.py', 'secrets.pem', '.env.txt', 'dir//x.py',
+                                  'web/.vendor/fixture.json', 'web/node_modules/pkg/main.js', 'web/dist/app.js',
+                                  'output/screenshot.json', '.playwright-cli/session.json', 'unknown/script.js',
+                                  'web/other.sh', 'Dockerfile'])
 def test_manifest_rejects_unsafe_paths(name):
     with pytest.raises(release.ReleaseError):
         release.validate_names([name])
@@ -45,6 +48,12 @@ def test_secret_scan_withholds_values(kind, secret):
 
 def test_generic_keywords_and_placeholders_are_allowed():
     assert release.scan('guide.md', b'Cookie, token, UID. C:/Users/<user>/example. Generate keys during tests.') == []
+
+
+def test_web_source_paths_allowed_without_allowing_runtime_folders():
+    names = ['web/src/app.js', 'web/src/index.html', 'web/src/icon.svg', 'web/package-lock.json',
+             'web/wasm-build/Dockerfile', 'web/wasm-build/.dockerignore', 'web/wasm-build/build.sh']
+    assert release.validate_names(names) == tuple(names)
 
 
 def test_failed_audit_does_not_write_archive(tmp_path):
